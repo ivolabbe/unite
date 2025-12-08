@@ -87,9 +87,7 @@ class Spectra:
         self.spectra = [spectrum for spectrum in self.spectra if len(spectrum.wave) > 0]
         self.names = [spectrum.name for spectrum in self.spectra]
 
-    def rescale(
-        self, config: dict, continuum_regions: list, linepad: u.Quantity
-    ) -> None:
+    def rescale(self, config: dict, continuum_regions: list, linepad: u.Quantity) -> None:
         """
         Rescale the errorbars in each region
 
@@ -111,10 +109,7 @@ class Spectra:
             spectrum.rescale(config, continuum_regions, linepad)
 
     def restrictAndRescale(
-        self,
-        config: dict,
-        continuum_regions: list,
-        linepad: u.Quantity = defaults.LINEPAD,
+        self, config: dict, continuum_regions: list, linepad: u.Quantity = defaults.LINEPAD
     ) -> None:
         """
         Restrict the spectra to the continuum regions and rescale the errorbars
@@ -145,6 +140,7 @@ class NIRSpecSpectra(Spectra):
         self,
         rows: Table,
         spectra_directory: str,
+        table_csv: str | None = None,  # path to csv file or URL
         λ_unit: u.Unit = u.micron,
         fλ_unit: u.Unit = u.Unit(1e-20 * u.erg / u.s / u.cm**2 / u.angstrom),
     ) -> None:
@@ -183,6 +179,9 @@ class NIRSpecSpectra(Spectra):
         # Compute the spectrum files
         spectrum_files = [path.join(spectra_directory, row['file']) for row in rows]
 
+        # download spectra if not present
+        self.download_spectra(spectrum_files, table_csv)
+
         # If there is only one spectrum, it is fixed, otherwise set PRISM to be free
         if len(spectrum_files) == 1:
             fixed = [True]
@@ -197,16 +196,46 @@ class NIRSpecSpectra(Spectra):
         ]
 
         # Initialize
-        super().__init__(
-            spectra=spectra,
-            redshift_initial=redshift_initial,
-            λ_unit=λ_unit,
-            fλ_unit=fλ_unit,
-        )
+        super().__init__(spectra=spectra, redshift_initial=redshift_initial, λ_unit=λ_unit, fλ_unit=fλ_unit)
 
-    def rescale(
-        self, config: dict, continuum_regions: list, linepad: u.Quantity
-    ) -> None:
+    @staticmethod
+    def download_spectra(spectrum_files: list, table_csv: str | None) -> None:
+        import os
+        from pathlib import Path
+        from astropy.utils.data import download_file
+
+        if all([Path(sf).exists() for sf in spectrum_files]):
+            return
+
+        # Updated September 5, 2025.  Include all public spectra even without redshift / line fits
+        version = "v4.4"
+        FITS_URL = "https://s3.amazonaws.com/msaexp-nirspec/extractions/{root}/{file}"
+        URL_PREFIX = "https://zenodo.org/records/15472354/files/"
+
+        if table_csv is None:
+            table_csv = f"{URL_PREFIX}/dja_msaexp_emission_lines_{version}.csv.gz"
+
+        p = Path(table_csv)
+        if p.exists():
+            tab = Table.read(str(p), format='csv')
+        else:
+            print('Downloading spectra csv table:', table_csv)
+            tab = Table.read(download_file(table_csv, cache=True), format='csv')
+
+        Path(Path(spectrum_files[0]).parent).mkdir(parents=True, exist_ok=True)
+
+        for sf in spectrum_files:
+            if not Path(sf).exists():
+                idx = np.where([Path(sf).name in f for f in tab['file']])[0]
+                print(Path(sf).parent, Path(sf).name, idx)
+                if np.sum(idx) == 0:
+                    raise ValueError(f'Spectrum file {sf.name} not found in table {table_csv}')
+
+                url = FITS_URL.format(**tab[idx][0])
+                print(f'Downloading spectrum: {sf} from {url}')
+                os.rename(download_file(url, cache=False, show_progress=True), sf)
+
+    def rescale(self, config: dict, continuum_regions: list, linepad: u.Quantity) -> None:
         """
         Rescale the errorbars in each region
 
@@ -291,10 +320,7 @@ class Spectrum:
 
         # Mask NaN values and store
         mask = np.invert(np.isnan(err))
-        for key, array in zip(
-            ['wave', 'low', 'high', 'flux', 'err'],
-            [wave, low, high, flux, err],
-        ):
+        for key, array in zip(['wave', 'low', 'high', 'flux', 'err'], [wave, low, high, flux, err]):
             setattr(self, key, array[mask])
 
     def __call__(self):
@@ -347,12 +373,7 @@ class Spectrum:
 
         # Compute the mask
         mask = np.logical_or.reduce(
-            np.array(
-                [
-                    self.coverage(region[0], region[1], partial=False)
-                    for region in continuum_regions
-                ]
-            )
+            np.array([self.coverage(region[0], region[1], partial=False) for region in continuum_regions])
         )
 
         # Apply the mask
@@ -360,12 +381,7 @@ class Spectrum:
             setattr(self, key, getattr(self, key)[mask])
 
     # Mask lines in continuum regions
-    def maskLines(
-        self,
-        config: list,
-        continuum_region: np.ndarray,
-        linepad: u.Quantity,
-    ) -> np.ndarray:
+    def maskLines(self, config: list, continuum_region: np.ndarray, linepad: u.Quantity) -> np.ndarray:
         """
         Mask the lines in the continuum region
 
@@ -447,9 +463,7 @@ class Spectrum:
         # Return scale that makes residuals have unit variance
         return np.sqrt(χ2_ν)
 
-    def rescale(
-        self, config: dict, continuum_regions: list, linepad: u.Quantity
-    ) -> None:
+    def rescale(self, config: dict, continuum_regions: list, linepad: u.Quantity) -> None:
         """
         Rescale the errorbars in each region
 

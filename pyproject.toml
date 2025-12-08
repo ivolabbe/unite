@@ -4,7 +4,13 @@ description = "Uniform NIRSpec Inference (Turbo) Engine"
 authors = [{name = "Raphael Erik Hviding", email = "raphael.hviding@gmail.com"}]
 requires-python = ">= 3.12"
 version = "0.0.1"
-dependencies = [ "numpyro>=0.18.0,<0.19", "astropy>=7.0.1,<8", "matplotlib>=3.10.3,<4", "jax>=0.4.38,<0.7", "tensorflow-probability>=0.25.0,<0.26", "jaxns>=2.6.6,<3"]
+dependencies = [ 
+"numpyro>=0.18.0,<0.19", 
+"astropy>=7.0.1,<8", 
+"matplotlib>=3.10.3,<4", 
+"jaxns>=2.6.6,<3"
+]
+
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
@@ -18,7 +24,6 @@ classifiers = [
 ]
 
 # [project.optional-dependencies]
-# metal = ["jax-metal>=0.1.1,<0.2", "jaxlib<0.5"]
 
 [build-system]
 build-backend = "hatchling.build"
@@ -32,9 +37,18 @@ channels = ["conda-forge"]
 platforms = ["osx-arm64", "linux-64", "osx-64"]
 
 [tool.pixi.environments]
-default = {features = [], solve-group = "default"}
-metal = {features = ["metal"], solve-group = "metal"}
+default = {features = ["default-jax"], solve-group = "default"}
+mac = {features = ["mac"], solve-group = "mac"}
 build = {features = ["build"], solve-group = "build"}
+
+[tool.pixi.feature.default-jax.pypi-dependencies]
+jax = ">=0.4.38,<0.6"
+jaxlib = ">=0.4.38,<0.6"
+
+[tool.pixi.feature.mac.target.osx-arm64.pypi-dependencies]
+jax = "==0.5.0"
+jaxlib = "==0.5.0"
+jax-metal = ">=0.1.1,<0.2"
 
 [tool.pixi.tasks]
 format = "ruff format unite"
@@ -43,13 +57,11 @@ format = "ruff format unite"
 python = ">=3.13.3,<3.14"
 ruff = ">=0.11.9,<0.12"
 pandas = ">=2.3.3,<3"
+ipykernel = ">=7.1.0,<8"
+setuptools = ">=80.9.0,<81"
 
 [tool.pixi.pypi-dependencies]
 unite = { path = ".", editable = true }
-
-[tool.pixi.feature.metal.target.osx-arm64.pypi-dependencies]
-jax-metal = ">=0.1.1,<0.2"
-jaxlib = "<0.5"
 
 [tool.pixi.feature.build]
 dependencies = { twine = ">=6.1.0,<7" }
