@@ -53,9 +53,7 @@ def NIRSpecFit(
     # Fit the data
     match backend:
         case 'MCMC':
-            samples, extras = MCMCFit(
-                model_args, rng_key, N=N, num_warmup=num_warmup, verbose=verbose
-            )
+            samples, extras = MCMCFit(model_args, rng_key, N=N, num_warmup=num_warmup, verbose=verbose)
         case 'NS':
             samples, extras = NSFit(model_args, rng_key)
         case 'MAP':
@@ -105,9 +103,7 @@ def NIRSpecModelArgs(config: dict, rows: Table, spectra_directory: str) -> Tuple
     cont_regs, cont_guesses = initial.computeContinuumRegions(config, spectra)
 
     # Compute Line Centers and Equalized estimates
-    line_centers, line_estimates_eq = initial.linesFluxesGuess(
-        config, spectra, cont_regs, cont_guesses
-    )
+    line_centers, line_estimates_eq = initial.linesFluxesGuess(config, spectra, cont_regs, cont_guesses)
 
     # Restrict spectra to continuum regions and rescale errorbars in each region
     spectra.restrictAndRescale(config, cont_regs)
@@ -129,11 +125,7 @@ def NIRSpecModelArgs(config: dict, rows: Table, spectra_directory: str) -> Tuple
 
 
 def MCMCFit(
-    model_args: tuple,
-    rng_key: random.PRNGKey,
-    N: int = 500,
-    num_warmup: int = 250,
-    verbose=True,
+    model_args: tuple, rng_key: random.PRNGKey, N: int = 500, num_warmup: int = 250, verbose=True
 ) -> Tuple[Dict, Dict]:
     """
     Fit the NIRSpec data with MCMC.
@@ -157,9 +149,7 @@ def MCMCFit(
 
     # MCMC
     kernel = infer.NUTS(multiSpecModel)
-    mcmc = infer.MCMC(
-        kernel, num_samples=N, num_warmup=num_warmup, progress_bar=verbose
-    )
+    mcmc = infer.MCMC(kernel, num_samples=N, num_warmup=num_warmup, progress_bar=verbose)
     mcmc.run(rng_key, *model_args)
 
     # Get the samples
@@ -169,17 +159,13 @@ def MCMCFit(
     logL = computeProbs(samples, model_args)
 
     # Compute the WAIC
-    waic = -2 * (
-        np.log(np.exp(logL).mean(axis=0)).sum() - logL.var(axis=0, ddof=1).sum()
-    )
+    waic = -2 * (np.log(np.exp(logL).mean(axis=0)).sum() - logL.var(axis=0, ddof=1).sum())
     extras = {'WAIC': waic}
 
     return samples, extras
 
 
-def NSFit(
-    model_args: tuple, rng_key: random.PRNGKey, N: int = 1000
-) -> Tuple[Dict, Dict]:
+def NSFit(model_args: tuple, rng_key: random.PRNGKey, N: int = 1000) -> Tuple[Dict, Dict]:
     """
     Fit the NIRSpec data with Nested Sampling.
 
@@ -198,21 +184,13 @@ def NSFit(
     with trace() as tr:
         with seed(multiSpecModel, rng_seed=rng_key):
             multiSpecModel(*model_args)
-    nv = sum(
-        [
-            v['value'].size
-            for v in tr.values()
-            if v['type'] == 'sample' and not v['is_observed']
-        ]
-    )
+    nv = sum([v['value'].size for v in tr.values() if v['type'] == 'sample' and not v['is_observed']])
 
     # Nested Sampling
     constructor_kwargs = {'num_live_points': 50 * (nv + 1), 'max_samples': 50000}
     termination_kwargs = {'dlogZ': 0.01}
     NS = NestedSampler(
-        model=multiSpecModel,
-        constructor_kwargs=constructor_kwargs,
-        termination_kwargs=termination_kwargs,
+        model=multiSpecModel, constructor_kwargs=constructor_kwargs, termination_kwargs=termination_kwargs
     )
     NS.run(rng_key, *model_args)
 
@@ -223,17 +201,12 @@ def NSFit(
     _ = computeProbs(samples, model_args)
 
     # Add log evidence to samples
-    extras = {
-        'logZ': float(NS._results.log_Z_mean),
-        'logZ_err': float(NS._results.log_Z_uncert),
-    }
+    extras = {'logZ': float(NS._results.log_Z_mean), 'logZ_err': float(NS._results.log_Z_uncert)}
 
     return samples, extras
 
 
-def MAPFit(
-    model_args: tuple, rng_key: random.PRNGKey, N: int = 1000
-) -> Tuple[Dict, Dict]:
+def MAPFit(model_args: tuple, rng_key: random.PRNGKey, N: int = 1000) -> Tuple[Dict, Dict]:
     """
     Fit the NIRSpec data with Maximum A Posteriori estimation.
 
@@ -272,8 +245,7 @@ def MAPFit(
     samples = {
         name: jnp.array(site['value'])[None, ...]  # Add sample dimension
         for name, site in traced_model.items()
-        if site['type'] in ['deterministic', 'sample']
-        and not site.get('is_observed', False)
+        if site['type'] in ['deterministic', 'sample'] and not site.get('is_observed', False)
     }
 
     return samples, {'losses': losses}
@@ -288,9 +260,7 @@ def computeProbs(samples: dict, model_args: tuple) -> np.ndarray:
     samples['logL'] = logL.sum(1)
 
     # Compute the log density
-    logP = vmap(lambda s: infer.util.log_density(multiSpecModel, model_args, {}, s)[0])(
-        samples
-    )
+    logP = vmap(lambda s: infer.util.log_density(multiSpecModel, model_args, {}, s)[0])(samples)
     samples['logP'] = np.array(logP)
 
     return logL
@@ -318,20 +288,13 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
         samples[f'{spectrum.name}_wavelength'] = spectrum.wave
 
     # Create outputs
-    colnames = [
-        n
-        for n in ['lsf_scale', 'PRISM_flux', 'PRISM_offset', 'logL', 'logP']
-        if n in samples.keys()
-    ]
+    colnames = [n for n in ['lsf_scale', 'PRISM_flux', 'PRISM_offset', 'logL', 'logP'] if n in samples.keys()]
     out = Table([samples[name] for name in colnames], names=colnames)
 
     # Add continuum regions and error scales to samples
     samples['cont_regs'] = np.array(cont_regs)
     samples.update(
-        {
-            f'{spectrum.name}_errscales': np.array(spectrum.errscales)
-            for spectrum in spectra.spectra
-        }
+        {f'{spectrum.name}_errscales': np.array(spectrum.errscales) for spectrum in spectra.spectra}
     )
 
     # Save all samples as npz
@@ -340,12 +303,12 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
     # Get names of the lines
     # TODO: Better sanitization of line names?
     line_names = [
-        re.sub(
-            r'[\[\]]',
-            '',
-            f'{species["Name"]}_{species["LineType"]}_{line["Wavelength"]}',
+        (
+            f'{group_name}_{species["Name"]}_{species["LineType"]}_{line["Wavelength"]}'
+            if group_name  # If group_name is not empty
+            else f'{species["Name"]}_{species["LineType"]}_{line["Wavelength"]}'
         )
-        for _, group in config['Groups'].items()
+        for group_name, group in config['Groups'].items()
         for species in group['Species']
         for line in species['Lines']
     ]
@@ -353,12 +316,7 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
     # Append line parameter samples
     for colname, unit in zip(
         ['redshift', 'flux', 'fwhm', 'ew'],
-        [
-            u.dimensionless_unscaled,
-            u.Unit(1e-20 * u.erg / u.cm**2 / u.s),
-            u.km / u.s,
-            u.AA,
-        ],
+        [u.dimensionless_unscaled, u.Unit(1e-20 * u.erg / u.cm**2 / u.s), u.km / u.s, u.AA],
     ):
         data = np.array(samples[f'{colname}_all'].T.tolist()) * unit
         out_part = Table(data.T, names=[f'{line}_{colname}' for line in line_names])
@@ -367,9 +325,7 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
     # Append LSF samples
     for spectrum in spectra.spectra:
         data = np.array(samples[f'{spectrum.name}_lsf'].T.tolist()) * spectra.λ_unit
-        out_part = Table(
-            data.T, names=[f'{spectrum.name}_{line}_lsf' for line in line_names]
-        )
+        out_part = Table(data.T, names=[f'{spectrum.name}_{line}_lsf' for line in line_names])
         out = hstack([out, out_part])
 
     # Create extra table
@@ -377,11 +333,7 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
 
     # Create HDUList
     hdul = fits.HDUList(
-        [
-            fits.PrimaryHDU(),
-            fits.BinTableHDU(out, name='PARAMS'),
-            fits.BinTableHDU(extra, name='EXTRAS'),
-        ]
+        [fits.PrimaryHDU(), fits.BinTableHDU(out, name='PARAMS'), fits.BinTableHDU(extra, name='EXTRAS')]
     )
 
     # Save the summary
@@ -395,14 +347,19 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
 
 
 def plotResults(
-    config: list, rows: Table, model_args: tuple, samples: dict, output_dir: str
+    config: list,
+    rows: Table,
+    model_args: tuple,
+    samples: dict,
+    output_dir: str,
+    plot_kwargs: dict | None = None,
 ) -> None:
     """
     Plot the results of the sampling.
 
     Parameters
     ----------
-    savedir : str
+    output_dir : str
         Directory to save the plots
     config: list
         Configuration list
@@ -412,54 +369,46 @@ def plotResults(
         Arguments for the model
     samples : dict
         Samples from the MCMC
-
-
-    Returns
-    -------
-    None
-
+    plot_kwargs : dict, optional
+        Per-axis plotting options, e.g.
+        {
+            "tick_labelsize": 12,
+            "tick_length": 6,
+            "tick_width": 1.2,
+            "yscale": ("symlog", {"linthresh": 1e-18}),  # or "log"
+            "xscale": "linear"
+        }
     """
-    # Get config name
+    plot_kwargs = plot_kwargs or {}
     cname = '_' + config['Name'] if config['Name'] else ''
 
     os.makedirs(f'{output_dir}/Plots/', exist_ok=True)
 
-    # Unpack model arguements
     spectra, _, _, line_centers, _, cont_regs, _ = model_args
-
-    # Get the number of spectra and regions
     Nspec, Nregs = len(spectra.spectra), len(cont_regs)
 
-    # Plotting
     figsize = (7.5 * Nregs, 6 * Nspec)
-    fig, axes = pyplot.subplots(
-        Nspec, Nregs, figsize=figsize, sharex='col', constrained_layout=True
-    )
-    # fig.subplots_adjust(hspace=0.05, wspace=0.05)
+    fig, axes = pyplot.subplots(Nspec, Nregs, figsize=figsize, sharex='col', constrained_layout=True)
 
-    # Ensure axes is always a 2D array
     if Nspec == 1 and Nregs == 1:
-        axes = np.array([[axes]])  # Convert single Axes object to a 2D array
+        axes = np.array([[axes]])
     elif Nspec == 1 or Nregs == 1:
-        axes = np.atleast_2d(axes).reshape(Nspec, Nregs)  # Convert 1D array to 2D array
+        axes = np.atleast_2d(axes).reshape(Nspec, Nregs)
 
-    # Plot the spectra
+    tick_labelsize = plot_kwargs.get("tick_labelsize", 12)
+    tick_length = plot_kwargs.get("tick_length", 6)
+    tick_width = plot_kwargs.get("tick_width", 1.1)
+
     for i, spectrum in enumerate(spectra.spectra):
-        # Get the spectrum
         _, wave, _, flux, err = spectrum()
 
         for j, ax in enumerate(axes[i]):
-            # Get the continuum region
             cont_reg = cont_regs[j]
             mask = jnp.logical_and(wave > cont_reg[0], wave < cont_reg[1])
 
-            # Plot the spectrum
             ax.plot(wave[mask], flux[mask], color='k', ds='steps-mid')
-
-            # Plot errorbars on the spectrum
             ax.errorbar(wave[mask], flux[mask], yerr=err[mask], fmt='none', color='k')
 
-            # Plot the models
             model = samples[f'{spectrum.name}_model']
             for k in range(model.shape[0]):
                 ax.plot(
@@ -469,17 +418,31 @@ def plotResults(
                     alpha=np.clip(5 / len(model), 0.01, 1),
                     ds='steps-mid',
                 )
-
-            # Plot the best logP model
             m = model[samples['logP'].argmax()]
             ax.plot(wave[mask], m[mask], color='#A40122', alpha=1, lw=2, ds='steps-mid')
 
-            # Label the axes
+            # Optional scales
+            if "yscale" in plot_kwargs:
+                yscale = plot_kwargs["yscale"]
+                if isinstance(yscale, tuple):
+                    ax.set_yscale(yscale[0], **yscale[1])
+                else:
+                    ax.set_yscale(yscale)
+            if "xscale" in plot_kwargs:
+                xscale = plot_kwargs["xscale"]
+                if isinstance(xscale, tuple):
+                    ax.set_xscale(xscale[0], **xscale[1])
+                else:
+                    ax.set_xscale(xscale)
+            if "ylim" in plot_kwargs:
+                y_bottom = plot_kwargs["ylim"][0]
+                y_top = ax.get_ylim()[1] if len(plot_kwargs["ylim"]) == 1 else plot_kwargs["ylim"][1]
+                ax.set_ylim(y_bottom, y_top)
+
             if j == 0:
                 ax.set(ylabel=f'{spectrum.name}')
             ax.set(xlim=cont_reg)
 
-            # Add rest frame axis
             rest_ax = ax.secondary_xaxis(
                 'top',
                 functions=(
@@ -487,25 +450,28 @@ def plotResults(
                     lambda x: x * (1 + spectra.redshift_initial),
                 ),
             )
-
-            # Turn off top xticklabels in the middle
             if i > 0:
                 rest_ax.set(xticklabels=[])
-
-            # Turn off top xticks
             ax.tick_params(axis='x', which='both', top=False)
 
-            # Line Labels
             for line in jnp.unique(line_centers):
                 line = line * (1 + spectra.redshift_initial)
                 if line < cont_reg[0] or line > cont_reg[1]:
                     continue
                 ax.axvline(line, color='k', linestyle='--', alpha=0.5)
 
-    # Set superlabels
-    fig.supylabel(
-        rf'$f_\lambda$ [{spectrum.fλ_unit.to_string(format="latex", fraction=False)}]'
-    )
+            ax.tick_params(
+                axis='both', which='both', labelsize=tick_labelsize, length=tick_length, width=tick_width
+            )
+            rest_ax.tick_params(
+                axis='x',
+                which='both',
+                labelsize=max(tick_labelsize - 1, 8),
+                length=tick_length * 0.6,
+                width=tick_width * 0.8,
+            )
+
+    fig.supylabel(rf'$f_\lambda$ [{spectrum.fλ_unit.to_string(format="latex", fraction=False)}]')
     fig.supxlabel(
         rf'$\lambda$ (Observed) [{spectrum.λ_unit.to_string(format="latex", fraction=False)}]',
         y=-0.01,
@@ -513,10 +479,7 @@ def plotResults(
         fontsize='medium',
     )
     fig.suptitle(
-        rf'$\lambda$ (Rest) [{spectrum.λ_unit:latex_inline}]',
-        y=1.015,
-        va='center',
-        fontsize='medium',
+        rf'$\lambda$ (Rest) [{spectrum.λ_unit:latex_inline}]', y=1.015, va='center', fontsize='medium'
     )
     fig.text(
         0.5,
@@ -527,12 +490,7 @@ def plotResults(
         fontsize='large',
     )
 
-    # Show the plot
     fig.savefig(
-        os.path.join(
-            f'{output_dir}/Plots',
-            f'{rows[0]["root"]}-{rows[0]["srcid"]}{cname}_fit.png',
-        ),
-        dpi=300,
+        os.path.join(f'{output_dir}/Plots', f'{rows[0]["root"]}-{rows[0]["srcid"]}{cname}_fit.png'), dpi=300
     )
     pyplot.close(fig)

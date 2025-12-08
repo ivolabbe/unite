@@ -18,7 +18,9 @@ from matplotlib import pyplot
 from scipy.optimize import minimize
 
 
-def plotResults(config: list, rows: Table, model_args: tuple, samples: dict) -> None:
+def plotResults(
+    config: list, rows: Table, model_args: tuple, samples: dict, plot_kwargs: dict | None = None
+) -> None:
     """
     Plot the results of the sampling.
 
@@ -34,6 +36,15 @@ def plotResults(config: list, rows: Table, model_args: tuple, samples: dict) -> 
         Arguments for the model
     samples : dict
         Samples from the MCMC
+    plot_kwargs : dict, optional
+        Per-axis plotting options, e.g.
+        {
+            "tick_labelsize": 12,
+            "tick_length": 6,
+            "tick_width": 1.2,
+            "yscale": ("symlog", {"linthresh": 1e-18}),  # or "log"
+            "xscale": "linear"
+        }
 
 
     Returns
@@ -41,6 +52,8 @@ def plotResults(config: list, rows: Table, model_args: tuple, samples: dict) -> 
     None
 
     """
+    plot_kwargs = plot_kwargs or {}
+
     # Get config name
     cname = '_' + config['Name'] if config['Name'] else ''
 
@@ -52,9 +65,7 @@ def plotResults(config: list, rows: Table, model_args: tuple, samples: dict) -> 
 
     # Plotting
     figsize = (7.5 * Nregs, 6 * Nspec)
-    fig, axes = pyplot.subplots(
-        Nspec, Nregs, figsize=figsize, sharex='col', constrained_layout=True
-    )
+    fig, axes = pyplot.subplots(Nspec, Nregs, figsize=figsize, sharex='col', constrained_layout=True)
     # fig.subplots_adjust(hspace=0.05, wspace=0.05)
 
     # Ensure axes is always a 2D array
@@ -62,6 +73,10 @@ def plotResults(config: list, rows: Table, model_args: tuple, samples: dict) -> 
         axes = np.array([[axes]])  # Convert single Axes object to a 2D array
     elif Nspec == 1 or Nregs == 1:
         axes = np.atleast_2d(axes).reshape(Nspec, Nregs)  # Convert 1D array to 2D array
+
+    tick_labelsize = plot_kwargs.get("tick_labelsize", 12)
+    tick_length = plot_kwargs.get("tick_length", 6)
+    tick_width = plot_kwargs.get("tick_width", 1.1)
 
     # Plot the spectra
     for i, spectrum in enumerate(spectra.spectra):
@@ -86,20 +101,31 @@ def plotResults(config: list, rows: Table, model_args: tuple, samples: dict) -> 
                     wave[mask],
                     model[k][mask],
                     color='#E20134',
-                    alpha=np.clip(5 / len(model),0.01,1),
+                    alpha=np.clip(5 / len(model), 0.01, 1),
                     ds='steps-mid',
                 )
 
             # Plot the best logP model
             m = model[samples['logP'].argmax()]
-            ax.plot(
-                wave[mask],
-                m[mask],
-                color='#A40122',
-                alpha=1,
-                lw=2,
-                ds='steps-mid',
-            )
+            ax.plot(wave[mask], m[mask], color='#A40122', alpha=1, lw=2, ds='steps-mid')
+
+            # Apply optional scales
+            if "yscale" in plot_kwargs:
+                yscale = plot_kwargs["yscale"]
+                if isinstance(yscale, tuple):
+                    ax.set_yscale(yscale[0], **yscale[1])
+                else:
+                    ax.set_yscale(yscale)
+            if "xscale" in plot_kwargs:
+                xscale = plot_kwargs["xscale"]
+                if isinstance(xscale, tuple):
+                    ax.set_xscale(xscale[0], **xscale[1])
+                else:
+                    ax.set_xscale(xscale)
+            if "ylim" in plot_kwargs:
+                y_bottom = plot_kwargs["ylim"][0]
+                y_top = ax.get_ylim()[1]
+                ax.set_ylim(y_bottom, y_top)
 
             # Label the axes
             if j == 0:
@@ -129,10 +155,20 @@ def plotResults(config: list, rows: Table, model_args: tuple, samples: dict) -> 
                     continue
                 ax.axvline(line, color='k', linestyle='--', alpha=0.5)
 
+            # Tick styling
+            ax.tick_params(
+                axis='both', which='both', labelsize=tick_labelsize, length=tick_length, width=tick_width
+            )
+            rest_ax.tick_params(
+                axis='x',
+                which='both',
+                labelsize=max(tick_labelsize - 1, 8),
+                length=tick_length * 0.6,
+                width=tick_width * 0.8,
+            )
+
     # Set superlabels
-    fig.supylabel(
-        rf'$f_\lambda$ [{spectrum.fλ_unit.to_string(format="latex", fraction=False)}]'
-    )
+    fig.supylabel(rf'$f_\lambda$ [{spectrum.fλ_unit.to_string(format="latex", fraction=False)}]')
     fig.supxlabel(
         rf'$\lambda$ (Observed) [{spectrum.λ_unit.to_string(format="latex", fraction=False)}]',
         y=-0.01,
@@ -140,10 +176,7 @@ def plotResults(config: list, rows: Table, model_args: tuple, samples: dict) -> 
         fontsize='medium',
     )
     fig.suptitle(
-        rf'$\lambda$ (Rest) [{spectrum.λ_unit:latex_inline}]',
-        y=1.015,
-        va='center',
-        fontsize='medium',
+        rf'$\lambda$ (Rest) [{spectrum.λ_unit:latex_inline}]', y=1.015, va='center', fontsize='medium'
     )
     fig.text(
         0.5,
@@ -156,9 +189,7 @@ def plotResults(config: list, rows: Table, model_args: tuple, samples: dict) -> 
 
     # Show the plot
     fig.savefig(
-        os.path.join(
-            'NIRSpec/Plots', f'{rows[0]["root"]}-{rows[0]["srcid"]}{cname}_fit.pdf'
-        )
+        os.path.join('NIRSpec/Plots', f'{rows[0]["root"]}-{rows[0]["srcid"]}{cname}_fit.pdf'), dpi=300
     )
     pyplot.close(fig)
 
@@ -196,9 +227,7 @@ def plotLines(ax, config, model_args) -> None:
             for line in species['Lines']:
                 # Get the line center
                 line_center = (
-                    (line['Wavelength'] * oneplusz * u.Unit(config['Unit']))
-                    .to(spectra.λ_unit)
-                    .value
+                    (line['Wavelength'] * oneplusz * u.Unit(config['Unit'])).to(spectra.λ_unit).value
                 )
 
                 # Check if line is in the axis limits

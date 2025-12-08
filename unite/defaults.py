@@ -45,9 +45,9 @@ redshift: Final[dict[str, tuple[float]]] = {
 # Define the Dispersion priors in km/s
 fwhm: Final[dict[str, tuple[float]]] = {
     'narrow': (0, 750),
-    'broad': (250, 2500),
-    'cauchy': (250, 2500),
-    'absorption': (0, 1000),
+    'broad': (250, 7500),
+    'cauchy': (250, 7500),
+    'absorption': (0, 750),
     'emission': (0, 1000),
     'outflow': (150, 2500),
 }

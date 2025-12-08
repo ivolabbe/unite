@@ -140,7 +140,6 @@ class NIRSpecSpectra(Spectra):
         self,
         rows: Table,
         spectra_directory: str,
-        table_csv: str | None = None,  # path to csv file or URL
         λ_unit: u.Unit = u.micron,
         fλ_unit: u.Unit = u.Unit(1e-20 * u.erg / u.s / u.cm**2 / u.angstrom),
     ) -> None:
@@ -179,9 +178,6 @@ class NIRSpecSpectra(Spectra):
         # Compute the spectrum files
         spectrum_files = [path.join(spectra_directory, row['file']) for row in rows]
 
-        # download spectra if not present
-        self.download_spectra(spectrum_files, table_csv)
-
         # If there is only one spectrum, it is fixed, otherwise set PRISM to be free
         if len(spectrum_files) == 1:
             fixed = [True]
@@ -197,43 +193,6 @@ class NIRSpecSpectra(Spectra):
 
         # Initialize
         super().__init__(spectra=spectra, redshift_initial=redshift_initial, λ_unit=λ_unit, fλ_unit=fλ_unit)
-
-    @staticmethod
-    def download_spectra(spectrum_files: list, table_csv: str | None) -> None:
-        import os
-        from pathlib import Path
-        from astropy.utils.data import download_file
-
-        if all([Path(sf).exists() for sf in spectrum_files]):
-            return
-
-        # Updated September 5, 2025.  Include all public spectra even without redshift / line fits
-        version = "v4.4"
-        FITS_URL = "https://s3.amazonaws.com/msaexp-nirspec/extractions/{root}/{file}"
-        URL_PREFIX = "https://zenodo.org/records/15472354/files/"
-
-        if table_csv is None:
-            table_csv = f"{URL_PREFIX}/dja_msaexp_emission_lines_{version}.csv.gz"
-
-        p = Path(table_csv)
-        if p.exists():
-            tab = Table.read(str(p), format='csv')
-        else:
-            print('Downloading spectra csv table:', table_csv)
-            tab = Table.read(download_file(table_csv, cache=True), format='csv')
-
-        Path(Path(spectrum_files[0]).parent).mkdir(parents=True, exist_ok=True)
-
-        for sf in spectrum_files:
-            if not Path(sf).exists():
-                idx = np.where([Path(sf).name in f for f in tab['file']])[0]
-                print(Path(sf).parent, Path(sf).name, idx)
-                if np.sum(idx) == 0:
-                    raise ValueError(f'Spectrum file {sf.name} not found in table {table_csv}')
-
-                url = FITS_URL.format(**tab[idx][0])
-                print(f'Downloading spectrum: {sf} from {url}')
-                os.rename(download_file(url, cache=False, show_progress=True), sf)
 
     def rescale(self, config: dict, continuum_regions: list, linepad: u.Quantity) -> None:
         """
