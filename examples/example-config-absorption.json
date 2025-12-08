@@ -1,0 +1,20 @@
+{
+    "Name": "absorption",
+    "Unit": "Angstrom",
+    "Groups": {
+        "absorption": {
+            "TieRedshift": true,
+            "TieDispersion": true,
+            "Species": [
+                {
+                    "Name": "HI",
+                    "LineType": "absorption",
+                    "Lines": [
+                        {"Wavelength": 6564.61, "RelStrength": null},
+                        {"Wavelength": 4862.68, "RelStrength": null}
+                    ]
+                }
+            ]
+        }
+    }
+}

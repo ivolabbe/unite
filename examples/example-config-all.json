@@ -1,0 +1,308 @@
+{
+  "Name": "jg_abs",
+  "Unit": "Angstrom",
+  "Groups": {
+    "Narrow": {
+      "TieRedshift": true,
+      "TieDispersion": true,
+      "Species": [
+        {
+          "Name": "HI",
+          "LineType": "emission",
+          "Lines": [
+            {
+              "Wavelength": 6564.61,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4862.68,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4341.0,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4102.0,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 3970.0,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 3889.06,
+              "RelStrength": null
+            }
+          ]
+        },
+        {
+          "Name": "He",
+          "LineType": "emission",
+          "Lines": [
+            {
+              "Wavelength": 10830,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 5017.08,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 5877.25,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 3888.6,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4120.8,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4923.3,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 6680.0,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 3867.5,
+              "RelStrength": null
+            }
+          ]
+        },
+        {
+          "Name": "Pa",
+          "LineType": "emission",
+          "Lines": [
+            {
+              "Wavelength": 12818.1,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 10049.4,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 9545.98,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 10938.1,
+              "RelStrength": null
+            }
+          ]
+        },
+        {
+          "Name": "[NeIII]",
+          "LineType": "emission",
+          "Lines": [
+            {
+              "Wavelength": 3869.0,
+              "RelStrength": null
+            }
+          ]
+        },
+        {
+          "Name": "[OII]",
+          "LineType": "emission",
+          "Lines": [
+            {
+              "Wavelength": 3726.0,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 3729.0,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 6300.0,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 6363.0,
+              "RelStrength": null
+            }
+          ]
+        },
+        {
+          "Name": "[SIII]",
+          "LineType": "emission",
+          "Lines": [
+            {
+              "Wavelength": 9069.4,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 9532.1,
+              "RelStrength": null
+            }
+          ]
+        },
+        {
+          "Name": "[NII]",
+          "LineType": "emission",
+          "Lines": [
+            {
+              "Wavelength": 6585.27,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 6549.86,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 5755.0,
+              "RelStrength": null
+            }
+          ]
+        },
+        {
+          "Name": "[SII]",
+          "LineType": "emission",
+          "Lines": [
+            {
+              "Wavelength": 6718.29,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 6732.67,
+              "RelStrength": null
+            }
+          ]
+        },
+        {
+          "Name": "[OIII]",
+          "LineType": "emission",
+          "Lines": [
+            {
+              "Wavelength": 5008.24,
+              "RelStrength": 2.98
+            },
+            {
+              "Wavelength": 4960.295,
+              "RelStrength": 1
+            },
+            {
+              "Wavelength": 4363.2,
+              "RelStrength": null
+            }
+          ]
+        }
+      ]
+    },
+    "Broad": {
+      "TieRedshift": true,
+      "TieDispersion": true,
+      "Species": [
+        {
+          "Name": "HI",
+          "LineType": "broad",
+          "Lines": [
+            {
+              "Wavelength": 6564.61,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4862.68,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4341.0,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4102.0,
+              "RelStrength": null
+            }
+          ]
+        }
+      ]
+    },
+    "Broad_He": {
+      "TieRedshift": true,
+      "TieDispersion": true,
+      "Species": [
+        {
+          "Name": "He",
+          "LineType": "broad",
+          "Lines": [
+            {
+              "Wavelength": 10830,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 5017.08,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 5877.25,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 3888.6,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4120.8,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4923.3,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 6680.0,
+              "RelStrength": null
+            }
+          ]
+        },
+        {
+          "Name": "Pa",
+          "LineType": "broad",
+          "Lines": [
+            {
+              "Wavelength": 12818.1,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 10049.4,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 9545.98,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 10938.1,
+              "RelStrength": null
+            }
+          ]
+        }
+      ]
+    },
+    "absorption": {
+      "TieRedshift": true,
+      "TieDispersion": true,
+      "Species": [
+        {
+          "Name": "HI",
+          "LineType": "absorption",
+          "Lines": [
+            {
+              "Wavelength": 6564.61,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4862.68,
+              "RelStrength": null
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
