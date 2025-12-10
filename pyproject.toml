@@ -9,7 +9,7 @@ dependencies = [
 "astropy>=7.0.1,<8", 
 "matplotlib>=3.10.3,<4", 
 "jaxns>=2.6.6,<3"
-]
+, "splinex @ git+https://github.com/cornelius-braun/splinex.git", "chex>=0.1.90,<0.2", "pyneb>=1.1.28,<2"]
 
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -63,6 +63,7 @@ ipywidgets = ">=8.1.8,<9"
 
 [tool.pixi.pypi-dependencies]
 unite = { path = ".", editable = true }
+dotfit = { path = "../dotfit", editable = true }
 
 [tool.pixi.feature.build]
 dependencies = { twine = ">=6.1.0,<7" }
@@ -72,3 +73,5 @@ tasks = { build = "python -m build" }
 [tool.ruff.format]
 quote-style = "single"
 skip-magic-trailing-comma = true
+[tool.hatch.metadata]
+allow-direct-references = true

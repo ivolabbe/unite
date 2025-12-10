@@ -12,9 +12,9 @@ from astropy import units as u
 import jax.numpy as jnp
 
 # Constants used for line detection, line padding, and continuum regions
-LINEDETECT: Final[u.Quantity] = 1_000 * (u.km / u.s)
-LINEPAD: Final[u.Quantity] = 3_500 * (u.km / u.s)
-CONTINUUM: Final[u.Quantity] = 15_000 * (u.km / u.s)
+LINEDETECT: u.Quantity = 1_000 * (u.km / u.s)
+LINEPAD: u.Quantity = 3_500 * (u.km / u.s)
+CONTINUUM: u.Quantity = 15_000 * (u.km / u.s)
 
 # Dictionary that defines mapping from integers to line types
 linetypes: list = ['narrow', 'broad', 'cauchy', 'absorption', 'emission', 'outflow']
@@ -43,12 +43,12 @@ redshift: Final[dict[str, tuple[float]]] = {
 }
 
 # Define the Dispersion priors in km/s
-fwhm: Final[dict[str, tuple[float]]] = {
+fwhm: dict[str, tuple[float]] = {
     'narrow': (0, 750),
-    'broad': (250, 7500),
-    'cauchy': (250, 7500),
+    'broad': (1000, 7500),
+    'cauchy': (1000, 7500),
     'absorption': (0, 750),
-    'emission': (0, 1000),
+    'emission': (0, 750),
     'outflow': (150, 2500),
 }
 

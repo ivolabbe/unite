@@ -12,6 +12,7 @@ from astropy import units as u, constants as consts
 
 # Numerical packages
 import numpy as np
+from scipy.ndimage import median_filter
 
 # Calibration
 from unite import calibration, defaults
@@ -109,7 +110,11 @@ class Spectra:
             spectrum.rescale(config, continuum_regions, linepad)
 
     def restrictAndRescale(
-        self, config: dict, continuum_regions: list, linepad: u.Quantity = defaults.LINEPAD
+        self,
+        config: dict,
+        continuum_regions: list,
+        linepad: u.Quantity = defaults.LINEPAD,
+        rescale_errors: bool = True,
     ) -> None:
         """
         Restrict the spectra to the continuum regions and rescale the errorbars
@@ -127,7 +132,8 @@ class Spectra:
         """
 
         self.restrict(continuum_regions)
-        self.rescale(config, continuum_regions, linepad)
+        if rescale_errors:
+            self.rescale(config, continuum_regions, linepad)
 
 
 # NIRSpec Spectra
@@ -182,7 +188,7 @@ class NIRSpecSpectra(Spectra):
         if len(spectrum_files) == 1:
             fixed = [True]
         else:
-            fixed = [False if 'PRISM' in row['grating'] else True for row in rows]
+            fixed = [True if 'PRISM' in row['grating'] else False for row in rows]
         self.fixed = fixed
 
         # Load the spectra
@@ -237,6 +243,7 @@ class Spectrum:
         redshift_initial: float,
         λ_unit: u.Unit,
         fλ_unit: u.Unit,
+        valid: np.ndarray | None = None,
     ) -> None:
         """
         Initialize the spectrum
@@ -261,6 +268,8 @@ class Spectrum:
             Wavelength target unit
         fλ_unit : u.Unit
             Spectral flux target unit (fλ)
+        valid : np.ndarray, optional
+            Boolean array indicating valid pixels
 
         Returns
         -------
@@ -277,9 +286,14 @@ class Spectrum:
         self.λ_unit = λ_unit
         self.fλ_unit = fλ_unit
 
+        if valid is None:
+            valid = np.ones(len(flux), dtype=bool)
+
         # Mask NaN values and store
         mask = np.invert(np.isnan(err))
-        for key, array in zip(['wave', 'low', 'high', 'flux', 'err'], [wave, low, high, flux, err]):
+        for key, array in zip(
+            ['wave', 'low', 'high', 'flux', 'err', 'valid'], [wave, low, high, flux, err, valid]
+        ):
             setattr(self, key, array[mask])
 
     def __call__(self):
@@ -336,11 +350,21 @@ class Spectrum:
         )
 
         # Apply the mask
-        for key in ['wave', 'low', 'high', 'flux', 'err']:
+        for key in ['wave', 'low', 'high', 'flux', 'err', 'valid']:
             setattr(self, key, getattr(self, key)[mask])
 
     # Mask lines in continuum regions
-    def maskLines(self, config: list, continuum_region: np.ndarray, linepad: u.Quantity) -> np.ndarray:
+    def maskLines(
+        self,
+        config: dict,
+        continuum_region: np.ndarray,
+        broad_mask: u.Quantity = defaults.LINEPAD,
+        narrow_mask: u.Quantity = defaults.LINEPAD / 5.0,
+        broad_species: list = ['HI', 'He', 'Pa'],
+        sigma_clip: float = 3.0,
+        filter_length: int = 11,
+        verbose: bool = False,
+    ) -> np.ndarray:
         """
         Mask the lines in the continuum region
 
@@ -352,8 +376,18 @@ class Spectrum:
             Configuration of emission lines
         spectrum : Spectrum
             Spectrum
-        linepad : u.Quantity
-            Padding to mask emission lines
+        broad_mask : u.Quantity
+            Masking width for broad lines (velocity)
+        narrow_mask : u.Quantity, optional
+            Masking width for narrow lines (velocity). If None, uses broad_mask.
+        broad_species : list, optional
+            List of species to consider as broad.
+        sigma_clip : float, optional
+            Sigma clipping threshold for outlier rejection. Defaults to 3.0.
+        filter_length : int, optional
+            Length of the median filter for outlier rejection. Defaults to 11.
+        verbose : bool, optional
+            Print debug information. Defaults to False.
 
         Returns
         -------
@@ -361,31 +395,91 @@ class Spectrum:
             Masked region
         """
 
-        # Compute redshift and dimensionless padding unit
+        # Handle default narrow_mask
+        if narrow_mask is None:
+            narrow_mask = broad_mask
+
+        # Compute redshift
         opz = 1 + self.redshift_initial
-        pad = (linepad / consts.c).to(u.dimensionless_unscaled).value
+
+        # Convert masks to dimensionless padding
+        pad_broad = (broad_mask / consts.c).to(u.dimensionless_unscaled).value
+        pad_narrow = (narrow_mask / consts.c).to(u.dimensionless_unscaled).value
 
         # Extract the region
         low, high = continuum_region
         mask = np.logical_and(low < self.wave, self.wave < high)
+        mask = np.logical_and(mask, self.valid)
 
         # Mask each line
         λ_unit = u.Unit(config['Unit'])
         for group in config['Groups'].values():
             for species in group['Species']:
+                # Determine line type
+                line_type = species.get('LineType', 'narrow')
+                is_broad = line_type == 'broad'
+
+                # Filter by species if list provided
+                if is_broad and (broad_species is not None):
+                    if species['Name'] not in broad_species:
+                        is_broad = False
+
+                # Select padding
+                pad = pad_broad if is_broad else pad_narrow
+
                 for line in species['Lines']:
                     # Compute the line wavelength
                     linewav = (line['Wavelength'] * λ_unit).to(self.λ_unit).value * opz
 
                     # Get the effective padding
-                    linepad = linewav * pad
+                    this_linepad = linewav * pad
 
                     # Compute the boundaries
-                    low, high = linewav - linepad, linewav + linepad
+                    l, h = linewav - this_linepad, linewav + this_linepad
 
                     # Mask the line
-                    linemask = np.logical_and(low < self.wave, self.wave < high)
+                    linemask = np.logical_and(l < self.wave, self.wave < h)
                     mask = np.logical_and(mask, np.invert(linemask))
+
+        # Iterative rejection of outliers
+        if sigma_clip is not None:
+            for i in range(5):
+                # Interpolate over masked values to avoid biasing the median filter
+                flux_filled = self.flux.copy()
+                bad_indices = np.where(~mask)[0]
+
+                if np.any(mask):
+                    if len(bad_indices) > 0:
+                        flux_filled[bad_indices] = np.interp(
+                            self.wave[bad_indices], self.wave[mask], self.flux[mask]
+                        )
+                else:
+                    break
+
+                # Calculate median filter
+                continuum = median_filter(flux_filled, size=filter_length)
+
+                # Identify outliers: positive peaks > N * sigma
+                # We only care about outliers in the currently "good" mask
+                outliers = (self.flux - continuum > sigma_clip * self.err) & mask
+
+                n_outliers = np.sum(outliers)
+                if verbose:
+                    print(f"Iteration {i}: found {n_outliers} outliers")
+
+                if n_outliers == 0:
+                    break
+
+                # Mask outliers and their neighbors
+                outlier_indices = np.where(outliers)[0]
+                indices_to_mask = set(outlier_indices)
+                for idx in outlier_indices:
+                    if idx > 0:
+                        indices_to_mask.add(idx - 1)
+                    if idx < len(self.flux) - 1:
+                        indices_to_mask.add(idx + 1)
+
+                mask[list(indices_to_mask)] = False
 
         return mask
 
@@ -524,6 +618,9 @@ class NIRSpecSpectrum(Spectrum):
         err = spec['err'].to(fλ_unit, equivalencies=u.spectral_density(wave)).value
         wave = wave.value
 
+        # valid rows are where 'err' is not masked
+        valid = ~spec['err'].mask
+
         # Calculate bin edges
         δλ = np.diff(wave) / 2
         mid = wave[:-1] + δλ
@@ -542,4 +639,5 @@ class NIRSpecSpectrum(Spectrum):
             redshift_initial=redshift_initial,
             λ_unit=λ_unit,
             fλ_unit=fλ_unit,
+            valid=valid,
         )

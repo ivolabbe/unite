@@ -29,6 +29,7 @@ from jax import random, vmap, numpy as jnp
 from unite.model import multiSpecModel
 from unite.spectra import NIRSpecSpectra
 from unite import utils, initial, parameters
+from unite.plotting import plotResults
 
 # Plotting packages
 from matplotlib import pyplot
@@ -42,10 +43,11 @@ def NIRSpecFit(
     N: int = 500,
     num_warmup: int = 250,
     backend: str = 'MCMC',
+    rescale_errors=False,
     verbose=True,
 ) -> None:
     # Get the model arguments
-    config, model_args = NIRSpecModelArgs(config, rows, spectra_directory)
+    config, model_args = NIRSpecModelArgs(config, rows, spectra_directory, rescale_errors=rescale_errors)
 
     # Get the random key
     rng_key = random.PRNGKey(0)
@@ -69,7 +71,7 @@ def NIRSpecFit(
     saveResults(config, rows, model_args, samples, extras, output_directory)
 
 
-def NIRSpecModelArgs(config: dict, rows: Table, spectra_directory: str) -> Tuple:
+def NIRSpecModelArgs(config: dict, rows: Table, spectra_directory: str, rescale_errors=True) -> Tuple:
     """
     Get the model arguments for the NIRSpec data.
 
@@ -106,7 +108,7 @@ def NIRSpecModelArgs(config: dict, rows: Table, spectra_directory: str) -> Tuple
     line_centers, line_estimates_eq = initial.linesFluxesGuess(config, spectra, cont_regs, cont_guesses)
 
     # Restrict spectra to continuum regions and rescale errorbars in each region
-    spectra.restrictAndRescale(config, cont_regs)
+    spectra.restrictAndRescale(config, cont_regs, rescale_errors=rescale_errors)
 
     # Skip if no data
     if len(spectra.spectra) == 0:
@@ -293,9 +295,10 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
 
     # Add continuum regions and error scales to samples
     samples['cont_regs'] = np.array(cont_regs)
-    samples.update(
-        {f'{spectrum.name}_errscales': np.array(spectrum.errscales) for spectrum in spectra.spectra}
-    )
+    if hasattr(spectrum, 'errscales'):
+        samples.update(
+            {f'{spectrum.name}_errscales': np.array(spectrum.errscales) for spectrum in spectra.spectra}
+        )
 
     # Save all samples as npz
     np.savez(f'{savename}_full.npz', **samples)
@@ -344,153 +347,3 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
     df = pd.concat([t.to_pandas().quantile(qs).T for t in [out, extra]], axis=0)
     df.columns = ['P16', 'P50', 'P84']
     df.to_csv(f'{savename}_summary.csv')
-
-
-def plotResults(
-    config: list,
-    rows: Table,
-    model_args: tuple,
-    samples: dict,
-    output_dir: str,
-    plot_kwargs: dict | None = None,
-) -> None:
-    """
-    Plot the results of the sampling.
-
-    Parameters
-    ----------
-    output_dir : str
-        Directory to save the plots
-    config: list
-        Configuration list
-    rows : Table
-        Table of the rows
-    model_args : tuple
-        Arguments for the model
-    samples : dict
-        Samples from the MCMC
-    plot_kwargs : dict, optional
-        Per-axis plotting options, e.g.
-        {
-            "tick_labelsize": 12,
-            "tick_length": 6,
-            "tick_width": 1.2,
-            "yscale": ("symlog", {"linthresh": 1e-18}),  # or "log"
-            "xscale": "linear"
-        }
-    """
-    plot_kwargs = plot_kwargs or {}
-    cname = '_' + config['Name'] if config['Name'] else ''
-
-    os.makedirs(f'{output_dir}/Plots/', exist_ok=True)
-
-    spectra, _, _, line_centers, _, cont_regs, _ = model_args
-    Nspec, Nregs = len(spectra.spectra), len(cont_regs)
-
-    figsize = (7.5 * Nregs, 6 * Nspec)
-    fig, axes = pyplot.subplots(Nspec, Nregs, figsize=figsize, sharex='col', constrained_layout=True)
-
-    if Nspec == 1 and Nregs == 1:
-        axes = np.array([[axes]])
-    elif Nspec == 1 or Nregs == 1:
-        axes = np.atleast_2d(axes).reshape(Nspec, Nregs)
-
-    tick_labelsize = plot_kwargs.get("tick_labelsize", 12)
-    tick_length = plot_kwargs.get("tick_length", 6)
-    tick_width = plot_kwargs.get("tick_width", 1.1)
-
-    for i, spectrum in enumerate(spectra.spectra):
-        _, wave, _, flux, err = spectrum()
-
-        for j, ax in enumerate(axes[i]):
-            cont_reg = cont_regs[j]
-            mask = jnp.logical_and(wave > cont_reg[0], wave < cont_reg[1])
-
-            ax.plot(wave[mask], flux[mask], color='k', ds='steps-mid')
-            ax.errorbar(wave[mask], flux[mask], yerr=err[mask], fmt='none', color='k')
-
-            model = samples[f'{spectrum.name}_model']
-            for k in range(model.shape[0]):
-                ax.plot(
-                    wave[mask],
-                    model[k][mask],
-                    color='#E20134',
-                    alpha=np.clip(5 / len(model), 0.01, 1),
-                    ds='steps-mid',
-                )
-            m = model[samples['logP'].argmax()]
-            ax.plot(wave[mask], m[mask], color='#A40122', alpha=1, lw=2, ds='steps-mid')
-
-            # Optional scales
-            if "yscale" in plot_kwargs:
-                yscale = plot_kwargs["yscale"]
-                if isinstance(yscale, tuple):
-                    ax.set_yscale(yscale[0], **yscale[1])
-                else:
-                    ax.set_yscale(yscale)
-            if "xscale" in plot_kwargs:
-                xscale = plot_kwargs["xscale"]
-                if isinstance(xscale, tuple):
-                    ax.set_xscale(xscale[0], **xscale[1])
-                else:
-                    ax.set_xscale(xscale)
-            if "ylim" in plot_kwargs:
-                y_bottom = plot_kwargs["ylim"][0]
-                y_top = ax.get_ylim()[1] if len(plot_kwargs["ylim"]) == 1 else plot_kwargs["ylim"][1]
-                ax.set_ylim(y_bottom, y_top)
-
-            if j == 0:
-                ax.set(ylabel=f'{spectrum.name}')
-            ax.set(xlim=cont_reg)
-
-            rest_ax = ax.secondary_xaxis(
-                'top',
-                functions=(
-                    lambda x: x / (1 + spectra.redshift_initial),
-                    lambda x: x * (1 + spectra.redshift_initial),
-                ),
-            )
-            if i > 0:
-                rest_ax.set(xticklabels=[])
-            ax.tick_params(axis='x', which='both', top=False)
-
-            for line in jnp.unique(line_centers):
-                line = line * (1 + spectra.redshift_initial)
-                if line < cont_reg[0] or line > cont_reg[1]:
-                    continue
-                ax.axvline(line, color='k', linestyle='--', alpha=0.5)
-
-            ax.tick_params(
-                axis='both', which='both', labelsize=tick_labelsize, length=tick_length, width=tick_width
-            )
-            rest_ax.tick_params(
-                axis='x',
-                which='both',
-                labelsize=max(tick_labelsize - 1, 8),
-                length=tick_length * 0.6,
-                width=tick_width * 0.8,
-            )
-
-    fig.supylabel(rf'$f_\lambda$ [{spectrum.fλ_unit.to_string(format="latex", fraction=False)}]')
-    fig.supxlabel(
-        rf'$\lambda$ (Observed) [{spectrum.λ_unit.to_string(format="latex", fraction=False)}]',
-        y=-0.01,
-        va='center',
-        fontsize='medium',
-    )
-    fig.suptitle(
-        rf'$\lambda$ (Rest) [{spectrum.λ_unit:latex_inline}]', y=1.015, va='center', fontsize='medium'
-    )
-    fig.text(
-        0.5,
-        1.05,
-        f'{rows[0]["srcid"]} ({rows[0]["root"]}): $z = {spectrum.redshift_initial:.3f}$',
-        ha='center',
-        va='center',
-        fontsize='large',
-    )
-
-    fig.savefig(
-        os.path.join(f'{output_dir}/Plots', f'{rows[0]["root"]}-{rows[0]["srcid"]}{cname}_fit.png'), dpi=300
-    )
-    pyplot.close(fig)

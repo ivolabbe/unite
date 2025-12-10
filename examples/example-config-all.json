@@ -2,7 +2,7 @@
   "Name": "all",
   "Unit": "Angstrom",
   "Groups": {
-    "Narrow": {
+    "narrow": {
       "TieRedshift": true,
       "TieDispersion": true,
       "Species": [
@@ -11,27 +11,27 @@
           "LineType": "emission",
           "Lines": [
             {
-              "Wavelength": 6564.61,
+              "Wavelength": 6564.632,
               "RelStrength": null
             },
             {
-              "Wavelength": 4862.68,
+              "Wavelength": 4862.691,
               "RelStrength": null
             },
             {
-              "Wavelength": 4341.0,
+              "Wavelength": 4341.691,
               "RelStrength": null
             },
             {
-              "Wavelength": 4102.0,
+              "Wavelength": 4102.899,
               "RelStrength": null
             },
             {
-              "Wavelength": 3970.0,
+              "Wavelength": 3971.202,
               "RelStrength": null
             },
             {
-              "Wavelength": 3889.06,
+              "Wavelength": 3890.158,
               "RelStrength": null
             }
           ]
@@ -41,27 +41,19 @@
           "LineType": "emission",
           "Lines": [
             {
-              "Wavelength": 10830,
+              "Wavelength": 10833.306,
               "RelStrength": null
             },
             {
-              "Wavelength": 5017.08,
+              "Wavelength": 7067.125,
               "RelStrength": null
-            },
+            },            
             {
               "Wavelength": 5877.25,
               "RelStrength": null
             },
             {
-              "Wavelength": 3888.6,
-              "RelStrength": null
-            },
-            {
-              "Wavelength": 4120.8,
-              "RelStrength": null
-            },
-            {
-              "Wavelength": 4923.3,
+              "Wavelength": 3889.751,
               "RelStrength": null
             },
             {
@@ -69,7 +61,19 @@
               "RelStrength": null
             },
             {
-              "Wavelength": 3867.5,
+              "Wavelength": 5017.077,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4923.305,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4121.973,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 3872.884,
               "RelStrength": null
             }
           ]
@@ -79,19 +83,23 @@
           "LineType": "emission",
           "Lines": [
             {
-              "Wavelength": 12818.1,
+              "Wavelength": 12821.576,
               "RelStrength": null
             },
             {
-              "Wavelength": 10049.4,
+              "Wavelength": 10941.082,
               "RelStrength": null
             },
             {
-              "Wavelength": 9545.98,
+              "Wavelength": 10052.123,
               "RelStrength": null
             },
             {
-              "Wavelength": 10938.1,
+              "Wavelength": 9548.588,
+              "RelStrength": null
+            },            
+            {
+              "Wavelength": 9231.546,
               "RelStrength": null
             }
           ]
@@ -101,29 +109,42 @@
           "LineType": "emission",
           "Lines": [
             {
-              "Wavelength": 3869.0,
+              "Wavelength": 3869.86,
               "RelStrength": null
             }
           ]
         },
         {
+          "Name": "[OI]",
+          "LineType": "emission",
+          "Lines": [
+            {
+              "Wavelength": 6302.046,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 6365.536,
+              "RelStrength": null
+            }
+          ]
+        },        {
           "Name": "[OII]",
           "LineType": "emission",
           "Lines": [
             {
-              "Wavelength": 3726.0,
+              "Wavelength": 3727.092,
               "RelStrength": null
             },
             {
-              "Wavelength": 3729.0,
+              "Wavelength": 3729.875,
               "RelStrength": null
             },
             {
-              "Wavelength": 6300.0,
+              "Wavelength": 7322.01,
               "RelStrength": null
             },
             {
-              "Wavelength": 6363.0,
+              "Wavelength": 7332.75,
               "RelStrength": null
             }
           ]
@@ -133,11 +154,11 @@
           "LineType": "emission",
           "Lines": [
             {
-              "Wavelength": 9069.4,
+              "Wavelength": 9071.1,
               "RelStrength": null
             },
             {
-              "Wavelength": 9532.1,
+              "Wavelength": 9533.2,
               "RelStrength": null
             }
           ]
@@ -155,7 +176,7 @@
               "RelStrength": null
             },
             {
-              "Wavelength": 5755.0,
+              "Wavelength": 5756.19,
               "RelStrength": null
             }
           ]
@@ -187,16 +208,16 @@
               "RelStrength": 1
             },
             {
-              "Wavelength": 4363.2,
+              "Wavelength": 4364.436,
               "RelStrength": null
             }
           ]
         }
       ]
     },
-    "Broad": {
+    "broad": {
       "TieRedshift": true,
-      "TieDispersion": true,
+      "TieDispersion": false,
       "Species": [
         {
           "Name": "HI",
@@ -215,14 +236,14 @@
               "RelStrength": null
             },
             {
-              "Wavelength": 4102.0,
+              "Wavelength": 4102.899,
               "RelStrength": null
             }
           ]
         }
       ]
     },
-    "Broad_He": {
+    "broad": {
       "TieRedshift": true,
       "TieDispersion": true,
       "Species": [
@@ -235,27 +256,21 @@
               "RelStrength": null
             },
             {
-              "Wavelength": 5017.08,
+              "Wavelength": 7067.125,
               "RelStrength": null
             },
             {
               "Wavelength": 5877.25,
               "RelStrength": null
-            },
+            }
+          ]
+        },
+        {
+          "Name": "OI",
+          "LineType": "broad",
+          "Lines": [
             {
-              "Wavelength": 3888.6,
-              "RelStrength": null
-            },
-            {
-              "Wavelength": 4120.8,
-              "RelStrength": null
-            },
-            {
-              "Wavelength": 4923.3,
-              "RelStrength": null
-            },
-            {
-              "Wavelength": 6680.0,
+              "Wavelength": 8449.079,
               "RelStrength": null
             }
           ]
@@ -265,19 +280,23 @@
           "LineType": "broad",
           "Lines": [
             {
-              "Wavelength": 12818.1,
+              "Wavelength": 12821.576,
               "RelStrength": null
             },
             {
-              "Wavelength": 10049.4,
+              "Wavelength": 10941.082,
               "RelStrength": null
             },
             {
-              "Wavelength": 9545.98,
+              "Wavelength": 10052.123,
               "RelStrength": null
             },
             {
-              "Wavelength": 10938.1,
+              "Wavelength": 9548.588,
+              "RelStrength": null
+            },            
+            {
+              "Wavelength": 9231.546,
               "RelStrength": null
             }
           ]
@@ -298,6 +317,14 @@
             },
             {
               "Wavelength": 4862.68,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4341.691,
+              "RelStrength": null
+            },
+            {
+              "Wavelength": 4102.899,
               "RelStrength": null
             }
           ]
