@@ -73,5 +73,9 @@ tasks = { build = "python -m build" }
 [tool.ruff.format]
 quote-style = "single"
 skip-magic-trailing-comma = true
+
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.black]
+skip-magic-trailing-comma = true

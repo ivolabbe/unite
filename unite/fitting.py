@@ -29,7 +29,6 @@ from jax import random, vmap, numpy as jnp
 from unite.model import multiSpecModel
 from unite.spectra import NIRSpecSpectra
 from unite import utils, initial, parameters
-from unite.plotting import plotResults
 
 # Plotting packages
 from matplotlib import pyplot
@@ -37,17 +36,18 @@ from matplotlib import pyplot
 
 def NIRSpecFit(
     config: dict,
-    rows: Table,
-    spectra_directory: str,
-    output_directory: str,
+    rows: Table | None = None,  # provide either rows
+    spectra: NIRSpecSpectra | None = None,  # or spectra directly
+    output_directory: str = "out",
     N: int = 500,
     num_warmup: int = 250,
     backend: str = 'MCMC',
     rescale_errors=False,
     verbose=True,
 ) -> None:
+
     # Get the model arguments
-    config, model_args = NIRSpecModelArgs(config, rows, spectra_directory, rescale_errors=rescale_errors)
+    config, model_args = NIRSpecModelArgs(config, rows=rows, spectra=spectra, rescale_errors=rescale_errors)
 
     # Get the random key
     rng_key = random.PRNGKey(0)
@@ -64,14 +64,19 @@ def NIRSpecFit(
         case _:
             raise ValueError(f'Unknown backend: {backend}')
 
-    # Plot the results
-    plotResults(config, rows, model_args, samples, output_directory)
-
     # Save the results
     saveResults(config, rows, model_args, samples, extras, output_directory)
 
+    # Plot the results (use the in-memory samples/model_args to avoid reloading)
+    from unite.plotting import plotResults
 
-def NIRSpecModelArgs(config: dict, rows: Table, spectra_directory: str, rescale_errors=True) -> Tuple:
+    #    plotResults(config, rows, output_directory, samples, model_args)
+    plotResults(config, rows=rows, output_dir=output_directory)
+
+
+def NIRSpecModelArgs(
+    config: dict, rows: Table | None = None, spectra: NIRSpecSpectra | None = None, rescale_errors=True
+) -> Tuple:
     """
     Get the model arguments for the NIRSpec data.
 
@@ -89,7 +94,8 @@ def NIRSpecModelArgs(config: dict, rows: Table, spectra_directory: str, rescale_
     """
 
     # Load the spectra
-    spectra = NIRSpecSpectra(rows, spectra_directory)
+    if spectra is None:
+        spectra = NIRSpecSpectra(rows)
 
     # Restrict config to what we have coverage of
     config = utils.restrictConfig(config, spectra)
@@ -290,7 +296,9 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
         samples[f'{spectrum.name}_wavelength'] = spectrum.wave
 
     # Create outputs
-    colnames = [n for n in ['lsf_scale', 'PRISM_flux', 'PRISM_offset', 'logL', 'logP'] if n in samples.keys()]
+    colnames = [
+        n for n in ['lsf_scale', 'PRISM_flux', 'PRISM_offset', 'logL', 'logP'] if n in samples.keys()
+    ]
     out = Table([samples[name] for name in colnames], names=colnames)
 
     # Add continuum regions and error scales to samples
@@ -347,3 +355,73 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
     df = pd.concat([t.to_pandas().quantile(qs).T for t in [out, extra]], axis=0)
     df.columns = ['P16', 'P50', 'P84']
     df.to_csv(f'{savename}_summary.csv')
+
+
+def get_components_fit(
+    config: dict, model_args: tuple, samples: dict, method: str = 'median'
+) -> Tuple[Dict[str, Dict[str, jnp.ndarray]], dict]:
+    """
+    Reconstruct the individual lines and continuum for all components.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary
+    model_args : tuple
+        Arguments for the model
+    samples : dict
+        Samples from the MCMC
+    method : str, optional
+        Method to select parameters ('median' or 'max_prob'), by default 'median'
+
+    Returns
+    -------
+    components : Dict[str, Dict[str, jnp.ndarray]]
+        Dictionary of components for each spectrum.
+        Keys are spectrum names.
+        Values are dictionaries with keys 'lines' (n_pixels, n_lines) and 'continuum' (n_pixels,).
+    config : dict
+        The restricted configuration dictionary with 'Index' keys added, matching the model.
+    """
+    # Ensure config matches model
+    spectra = model_args[0]
+    config = utils.restrictConfig(config, spectra)
+    parameters.configToMatrices(config)  # Adds 'Index' in place
+
+    # Select parameters
+    if method == 'median':
+        params = {k: jnp.median(v, axis=0) for k, v in samples.items()}
+    elif method == 'max_prob':
+        idx = jnp.argmax(samples['logP'])
+        params = {k: v[idx] for k, v in samples.items()}
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+    # Filter out deterministic sites to force re-computation
+    # This prevents shape mismatches if model_args (e.g. pixel grid) changed
+    excluded_suffixes = ('_model', '_lines', '_cont', '_lsf', '_z_all')
+    excluded_keys = {'flux_all', 'redshift_all', 'fwhm_all', 'ew_all', 'cont_center', 'logP'}
+
+    params = {
+        k: v for k, v in params.items() if k not in excluded_keys and not k.endswith(excluded_suffixes)
+    }
+
+    # Run model with trace
+    with seed(rng_seed=0):
+        with substitute(data=params):
+            with trace() as tr:
+                multiSpecModel(*model_args)
+
+    # Extract components
+    spectra = model_args[0]
+    components = {}
+    for spec in spectra.spectra:
+        # Shape: (n_pixels, n_lines)
+        lines = tr[f'{spec.name}_lines']['value']
+        # Shape: (n_pixels,)
+        wave = tr[f'{spec.name}_wave']['value']
+        continuum = tr[f'{spec.name}_cont']['value']
+        model = tr[f'{spec.name}_model']['value']
+        components[spec.name] = {'wave': wave, 'lines': lines, 'continuum': continuum, 'model': model}
+
+    return components, config

@@ -37,6 +37,10 @@ def restrictConfig(config: dict, spectra: Spectra, linedet: u.Quantity = default
     list
         Updated configuration
     """
+    # Parse config['Region'] if it exists
+    if 'Region' in config:
+        config_region = u.Quantity(config['Region'], config['Unit']).to(spectra.λ_unit).value
+        config_region = config_region * (1 + spectra.redshift_initial)
 
     # Set the default linetype as narrow
     for group in config['Groups'].values():
@@ -54,11 +58,23 @@ def restrictConfig(config: dict, spectra: Spectra, linedet: u.Quantity = default
                     # Add it to the correct group
                     new_group = new_config['Groups'][dest]
 
+                    # Check if this component already exists in the destination group
+                    # to prevent re-expansion
+                    exists = False
+                    for s in new_group['Species']:
+                        if s['Name'] == species['Name'] and s.get('LineType') == comp:
+                            exists = True
+                            break
+
+                    if exists:
+                        continue
+
                     # Get copy of species
                     new_species = copy.deepcopy(species)
 
                     # Remove additional component and add LineType
-                    new_species.pop('AdditionalComponents')
+                    if 'AdditionalComponents' in new_species:
+                        new_species.pop('AdditionalComponents')
                     new_species['LineType'] = comp
 
                     # Add the new species
@@ -89,6 +105,10 @@ def restrictConfig(config: dict, spectra: Spectra, linedet: u.Quantity = default
 
                 # Check coverage
                 if jnp.logical_or.reduce(jnp.array([s.coverage(low, high).any() for s in spectra.spectra])):
+                    # dont add lines outside config region
+                    if 'Region' in config:
+                        if (low < config_region[0]) | (high > config_region[1]):
+                            continue
                     new_lines.append(line)
 
             # Add species only if it has remaining lines
@@ -209,6 +229,9 @@ def download_spectra(
     tab = Table(rows=selected_rows)
     # Each element in tab['grating'] is already a string; split directly
     tab['grating'] = [g.split('_')[0] for g in tab['grating']]
+
+    # Add spectra_directory column
+    tab['spectra_directory'] = [str(p.parent) for p in normalized_paths]
 
     return tab
 

@@ -4,6 +4,7 @@ Module for Loading Spectra Data
 
 # Import packages
 from os import path
+from pathlib import Path
 from importlib import resources
 
 # Astronomy packages
@@ -145,7 +146,6 @@ class NIRSpecSpectra(Spectra):
     def __init__(
         self,
         rows: Table,
-        spectra_directory: str,
         λ_unit: u.Unit = u.micron,
         fλ_unit: u.Unit = u.Unit(1e-20 * u.erg / u.s / u.cm**2 / u.angstrom),
     ) -> None:
@@ -156,8 +156,6 @@ class NIRSpecSpectra(Spectra):
         ----------
         rows : Table
             Table of rows for the source
-        spectra_directory : str
-            Path to directory containing the spectra
         instrument_directory : str
             Path to directory containing the lsf curves
         λ_unit : u.Unit
@@ -182,7 +180,10 @@ class NIRSpecSpectra(Spectra):
             redshift_initial = bestrow['z'][0]
 
         # Compute the spectrum files
-        spectrum_files = [path.join(spectra_directory, row['file']) for row in rows]
+        if 'spectra_directory' in rows.colnames:
+            spectrum_files = [path.join(row['spectra_directory'], row['file']) for row in rows]
+        else:
+            spectrum_files = [str(Path(row['file'])) for row in rows]
 
         # If there is only one spectrum, it is fixed, otherwise set PRISM to be free
         if len(spectrum_files) == 1:

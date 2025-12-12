@@ -14,6 +14,12 @@ from jax import config, jit, vmap, lax, numpy as jnp
 # σ_halfvar = sqrt(2) * σ
 _HALFVAR_SIGMA_TO_FWHM: Final[float] = 2 * jnp.sqrt(jnp.log(2))
 
+# Profile Types
+# Profile Types
+GAUSSIAN: Final[int] = 0
+LORENTZIAN: Final[int] = 1
+EXPONENTIAL: Final[int] = 2
+
 
 @jit
 def integrateGaussian(
@@ -279,18 +285,30 @@ def integrateGaussianLaplace(
     return gaussian_cdf + jnp.where(a > _OVERFLOW_THRESHOLD, 0, exp_correction / 4)
 
 
+# Wrappers for lax.switch
+def _wrap_gaussian(low, high, center, lsf, fwhm):
+    return integrateGaussian(low, high, center, jnp.sqrt(lsf**2 + fwhm**2))
+
+
+def _wrap_voigt(low, high, center, lsf, fwhm):
+    return integrateVoigt(low, high, center, lsf, fwhm)
+
+
+def _wrap_gaussian_laplace(low, high, center, lsf, fwhm):
+    return integrateGaussianLaplace(low, high, center, lsf, fwhm)
+
+
 @jit
-def integrateCond(
+def integrateSwitch(
     low: jnp.ndarray,
     high: jnp.ndarray,
     center: jnp.ndarray,
     lsf: jnp.ndarray,
     fwhm: jnp.ndarray,
-    is_voigt: jnp.ndarray,
+    type_idx: jnp.ndarray,
 ) -> jnp.ndarray:
     """
-    Integrate a single emission line profile (either Voigt or Gaussian)
-    depending on whether the line is broad.
+    Integrate a single emission line profile selecting the function based on profile_idx.
 
     Parameters
     ----------
@@ -304,21 +322,17 @@ def integrateCond(
         Line spread function
     fwhm : jnp.ndarray
         Full width at half maximum
-    is_voigt : jnp.ndarray
-        Whether the line is Voigt
+    profile_idx : jnp.ndarray
+        Index of the profile type
 
     Returns
     -------
     jnp.ndarray
         Integral across wavelenths
     """
-    return lax.cond(
-        is_voigt,
-        #        lambda _: integrateVoigt(low, high, center, lsf, fwhm),
-        lambda _: integrateGaussianLaplace(low, high, center, lsf, fwhm),
-        lambda _: integrateGaussian(low, high, center, jnp.sqrt(lsf * lsf + fwhm * fwhm)),
-        operand=None,  # No extra operand needed
-    )
+    # map to gaussian, lorentzian, exponential
+    branches = (_wrap_gaussian, _wrap_voigt, _wrap_gaussian_laplace)
+    return lax.switch(type_idx, branches, low, high, center, lsf, fwhm)
 
 
 @jit
@@ -328,12 +342,12 @@ def integrate(
     cent: jnp.ndarray,
     lsf: jnp.ndarray,
     fwhm: jnp.ndarray,
-    is_voigt: jnp.ndarray,
+    profile_idx: jnp.ndarray,
 ) -> jnp.ndarray:
     """
     Integrate N emission lines over λ bins.
     Returns a matrix of integrals in each bin for each line.
-    Uses Voigt profile if broad, otherwise Gaussian.
+    Uses profile_idx to select the profile type.
 
     Parameters
     ----------
@@ -347,8 +361,8 @@ def integrate(
         Line spread function
     fwfm : jnp.ndarray
         Full width at half maximum
-    is_broad : jnp.ndarray
-        Whether the line is broad
+    profile_idx : jnp.ndarray
+        Index of the profile type (0=Gaussian, 1=GaussianLaplace, 2=Voigt, etc.)
 
     Returns
     -------
@@ -356,10 +370,10 @@ def integrate(
         Integral across wavelenths
     """
     # Vectorize the integration across the lines
-    vectorized_integrate = vmap(integrateCond, in_axes=(None, None, 0, 0, 0, 0))
+    vectorized_integrate = vmap(integrateSwitch, in_axes=(None, None, 0, 0, 0, 0))
 
     # Perform the integration for all lines
-    return vectorized_integrate(low, high, cent, lsf, fwhm, is_voigt)
+    return vectorized_integrate(low, high, cent, lsf, fwhm, profile_idx)
 
 
 @jit

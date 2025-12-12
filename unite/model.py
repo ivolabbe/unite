@@ -33,6 +33,7 @@ def multiSpecModel(
     line_estimates_eq: jnp.ndarray,
     cont_regs: jnp.ndarray,
     cont_guesses: jnp.ndarray,
+    return_components: bool = False,
 ) -> None:
     """
     Multi-Spectrum Model
@@ -68,8 +69,10 @@ def multiSpecModel(
     # Unpack line types
     linetypes, lts_orig, lts_add = linetypes_all
 
-    # Keep track of whether the line is a Voigt profile
-    is_voigt = linetypes == defaults.LINETYPES['cauchy']
+    # Map linetypes to optimized profile indices, Default to Gaussian (0)
+    type_idx = jnp.zeros_like(linetypes, dtype=jnp.int32)
+    type_idx = jnp.where(linetypes == defaults.LINETYPES['lorentzian'], optimized.LORENTZIAN, type_idx)
+    type_idx = jnp.where(linetypes == defaults.LINETYPES['exponential'], optimized.EXPONENTIAL, type_idx)
 
     # Build the original parameters
     params = {}
@@ -129,6 +132,9 @@ def multiSpecModel(
     determ('ew_all', fluxes / (linecont * oneplusz))
 
     # Loop over spectra
+    if return_components:
+        components = {}
+
     for spectrum in spectra.spectra:
         # Get the spectrum
         low, wave, high, flux, err = (jnp.array(x) for x in spectrum())
@@ -142,6 +148,8 @@ def multiSpecModel(
         high = high - spectrum.offset(high, pixel_offset)
         cont_regs_shift = cont_regs - spectrum.offset(cont_regs, pixel_offset)
 
+        wave = determ(f'{spectrum.name}_wave', wave)
+
         # Compute effective redshift after shift
         # centers_shift = centers - spectrum.offset(centers, pixel_offset)
         # determ(f'{spectrum.name}_z_all', (centers_shift / line_centers) - 1)
@@ -150,7 +158,7 @@ def multiSpecModel(
         fwhms_lsf = determ(f'{spectrum.name}_lsf', spectrum.lsf(centers, lsf_scale))
 
         # Integrate pixels (note, this is total integral, not a density)
-        pixints = optimized.integrate(low, high, centers, fwhms_lsf, fwhms, is_voigt).T
+        pixints = optimized.integrate(low, high, centers, fwhms_lsf, fwhms, type_idx).T
 
         # Divide by bin width to compute flux density
         fλ = pixints / (high - low)[:, jnp.newaxis]
@@ -169,3 +177,8 @@ def multiSpecModel(
 
         # Compute likelihood
         sample(f'{spectrum.name}', dist.Normal(model, err), obs=flux)
+
+
+#        components[spectrum.name] = (wave, lines, continuum, model)
+#   if return_components:
+#       return wave, fλ, params, (fluxes, linecont, centers, fwhms)

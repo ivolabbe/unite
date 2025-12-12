@@ -17,17 +17,18 @@ LINEPAD: u.Quantity = 3_500 * (u.km / u.s)
 CONTINUUM: u.Quantity = 15_000 * (u.km / u.s)
 
 # Dictionary that defines mapping from integers to line types
-linetypes: list = ['narrow', 'broad', 'cauchy', 'absorption', 'emission', 'outflow']
+linetypes: list = ['narrow', 'broad', 'lorentzian', 'exponential', 'absorption', 'emission', 'outflow']
 LINETYPES: Final[dict] = {line: i for i, line in enumerate(linetypes)}
 
 # Define the Flux priors (scale relative to the guess)
-flux: Final[dict[str, tuple[float]]] = {
+flux: dict[str, tuple[float]] = {
     'narrow': (-2, 2),
     'broad': (0, 3),
-    'cauchy': (0, 3),
-    'absorption': (-2, 0),
     'emission': (0, 2),
     'outflow': (-2, 2),
+    'absorption': (-2, 0),
+    'lorentzian': (0, 3),
+    'exponential': (0, 3),
 }
 
 
@@ -36,20 +37,22 @@ flux: Final[dict[str, tuple[float]]] = {
 redshift: Final[dict[str, tuple[float]]] = {
     'narrow': (-δz, δz),
     'broad': (-2 * δz, 2 * δz),
-    'cauchy': (-2 * δz, 2 * δz),
-    'absorption': (-3 * δz, 3 * δz),
     'emission': (-δz, δz),
-    'outflow': (-δz, 2 * δz),
+    'outflow': (-δz, δz),
+    'absorption': (-3 * δz, 3 * δz),
+    'lorentzian': (-2 * δz, 2 * δz),
+    'exponential': (-2 * δz, 2 * δz),
 }
 
 # Define the Dispersion priors in km/s
 fwhm: dict[str, tuple[float]] = {
     'narrow': (0, 750),
     'broad': (1000, 7500),
-    'cauchy': (1000, 7500),
-    'absorption': (0, 750),
     'emission': (0, 750),
-    'outflow': (150, 2500),
+    'absorption': (0, 750),
+    'outflow': (200, 2500),
+    'lorentzian': (200, 7500),
+    'exponential': (200, 7500),
 }
 
 
