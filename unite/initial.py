@@ -188,12 +188,12 @@ def computeContinuumRegions(
             cont_regs.append(region)
 
     # Convert to correct units and redshift
-    if 'Region' in config:
-        config_region = u.Quantity(config['Region'], config['Unit']).to(spectra.λ_unit)
-        cont_regs = [
-            u.Quantity([np.maximum(reg[0], config_region[0]), np.minimum(reg[1], config_region[1])])
-            for reg in cont_regs
-        ]
+    # if 'Region' in config:
+    #     config_region = u.Quantity(config['Region'], config['Unit']).to(spectra.λ_unit)
+    #     cont_regs = [
+    #         u.Quantity([np.maximum(reg[0], config_region[0]), np.minimum(reg[1], config_region[1])])
+    #         for reg in cont_regs
+    #     ]
 
     cont_regs_rest = jnp.array([cont_regs.to(spectra.λ_unit).value for cont_regs in cont_regs])
     cont_regs_obs = cont_regs_rest * (1 + spectra.redshift_initial)

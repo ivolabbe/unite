@@ -34,7 +34,7 @@ flux: dict[str, tuple[float]] = {
 
 # Define the Redshift priors in dimensionless units
 δz: Final[float] = 0.005
-redshift: Final[dict[str, tuple[float]]] = {
+redshift: dict[str, tuple[float]] = {
     'narrow': (-δz, δz),
     'broad': (-2 * δz, 2 * δz),
     'emission': (-δz, δz),

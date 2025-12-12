@@ -165,6 +165,10 @@ def plotRegion(
                 linestyle = data.get('linestyle', '-')
 
                 # Check visibility in mask
+                if not jnp.any(mask):
+                    continue
+
+                # Check visibility in mask
                 if jnp.max(s_flux[mask]) > 1e-10 or jnp.min(s_flux[mask]) < -1e-10:
                     ax.plot(wave[mask], s_flux[mask], color=color, linestyle=linestyle, alpha=0.8, lw=1.5)
 
