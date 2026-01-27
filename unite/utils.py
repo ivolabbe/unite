@@ -154,10 +154,11 @@ from astropy.table import Table
 
 def download_spectra(
     spectrum_files: list,
-    table_csv: str | None,
-    default_url_prefix: str = "https://zenodo.org/records/15472354/files/",
-    # Updated September 5, 2025.  Include all public spectra even without redshift / line fits
-    version: str = "v4.4",
+    table_csv: str | None = None,
+    #    default_url_prefix: str = "https://zenodo.org/records/15472354/files/",
+    default_url_prefix: str = "https://s3.amazonaws.com/msaexp-nirspec/extractions",
+    # Updated 19 Jan 2026
+    version: str = "v4.5",
     spectra_directory: str | None = None,
 ) -> Table:
     """
@@ -182,7 +183,8 @@ def download_spectra(
     files can ignore the new parameters.
     """
 
-    FITS_URL = "https://s3.amazonaws.com/msaexp-nirspec/extractions/{root}/{file}"
+    #    FITS_URL = "https://s3.amazonaws.com/msaexp-nirspec/extractions/{root}/{file}"
+    FITS_URL = f"{default_url_prefix}/{{root}}/{{file}}"
 
     # Normalize paths; allow passing bare filenames with a target directory
     normalized_paths = []
@@ -198,7 +200,7 @@ def download_spectra(
     #     return None
 
     if table_csv is None:
-        table_csv = f"{default_url_prefix}/dja_msaexp_emission_lines_{version}.csv.gz"
+        table_csv = os.path.join(default_url_prefix, f'dja_msaexp_emission_lines_{version}.csv.gz')
 
     p = Path(table_csv)
     if p.exists():

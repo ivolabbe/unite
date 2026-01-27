@@ -5,3 +5,6 @@ dist/
 # pixi environments
 .pixi
 *.egg-info
+
+examples/
+!*example.ipynb
