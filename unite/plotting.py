@@ -22,7 +22,7 @@ from matplotlib import pyplot
 from matplotlib.ticker import AutoMinorLocator
 import matplotlib.lines as mlines
 from scipy.optimize import minimize
-from unite.spectra import NIRSpecSpectrum
+from unite.spectra import NIRSpecSpectra, NIRSpecSpectrum
 
 
 def get_ion_props(name: str) -> Tuple[str, str, Optional[str]]:
@@ -353,6 +353,7 @@ def plotResults(
     model_args: tuple | None = None,
     plot_kwargs: dict | None = None,
     components: dict | None = None,
+    spectra: NIRSpecSpectra | None = None,
 ) -> Tuple[pyplot.Figure, dict]:
     """
     Plot the results of the sampling.
@@ -398,7 +399,7 @@ def plotResults(
 
     # Respect provided model_args; only rebuild if missing
     if model_args is None:
-        _, model_args = NIRSpecModelArgs(config, rows=rows, rescale_errors=rescale_errors)
+        _, model_args = NIRSpecModelArgs(config, rows=rows, spectra=spectra, rescale_errors=rescale_errors)
 
     # Respect provided samples; only load from disk if missing
     if samples is None:
@@ -413,7 +414,9 @@ def plotResults(
 
     os.makedirs(f'{output_dir}/Plots/', exist_ok=True)
 
-    spectra, _, _, line_centers, _, cont_regs, _ = model_args
+    spectra_args, _, _, line_centers, _, cont_regs, _ = model_args
+    if spectra is None:
+        spectra = spectra_args
     Nspec, Nregs = len(spectra.spectra), len(cont_regs)
 
     # Increased height slightly to accommodate residuals

@@ -120,10 +120,8 @@ def multiSpecModel(
     with plate(f'Nc = {Nc}', Nc):
         # Continuum centers
         cont_centers = determ('cont_center', cont_regs.mean(axis=1))
-
         # Continuum angles
         angles = sample('cont_angle', priors.angle_prior())
-
         # Continuum offsets
         offsets = sample('cont_offset', priors.height_prior(cont_guesses))
 

@@ -77,16 +77,16 @@ def configToMatrices(
                 # Increment line index
                 i += 1
 
-            # If Group is not tied, increment
-            if not group['TieRedshift']:
-                i_z += 1
-            if not group['TieDispersion']:
-                i_σ += 1
+                # If Group is not tied, increment per line
+                if not group['TieRedshift']:
+                    i_z += 1
+                if not group['TieDispersion']:
+                    i_σ += 1
 
-        # Increment between groups if we didn't already and species is not empty
-        if group['Species']:
+        # Increment between groups if tied and species is not empty
+        if group['Species'] and group['TieRedshift']:
             i_z += 1
-        if group['Species']:
+        if group['Species'] and group['TieDispersion']:
             i_σ += 1
 
     # Iterate again to find origin for each additional component

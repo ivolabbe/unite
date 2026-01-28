@@ -422,6 +422,14 @@ def get_components_fit(
         wave = tr[f'{spec.name}_wave']['value']
         continuum = tr[f'{spec.name}_cont']['value']
         model = tr[f'{spec.name}_model']['value']
+
+        # Apply flux scale so components match the model/data units
+        flux_key = f'{spec.name}_flux'
+        if flux_key in tr:
+            flux_scale = tr[flux_key]['value']
+            lines = lines * flux_scale
+            continuum = continuum * flux_scale
+
         components[spec.name] = {'wave': wave, 'lines': lines, 'continuum': continuum, 'model': model}
 
     return components, config

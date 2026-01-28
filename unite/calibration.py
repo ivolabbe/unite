@@ -16,6 +16,7 @@ from unite import priors
 # JAX packages
 from jax import jit, numpy as jnp
 
+
 # Generic Calibration
 def NIRSpecCalibration(names: list, fixed: list) -> None:
     """
@@ -84,9 +85,11 @@ def PolyLSFCurve(resolution_file: str, λ_unit: u.Unit) -> Callable:
 
     # Compute Polynomial Resolution Curve
     # LSF FWHM in wavelength units
+    # lsf_scale is usually understood as resolution = lambda/dlambda
+    # (see eg prior set to 1.2), so divide by scale
     @jit
     def lsf(λ, scale):
-        return scale * (λ / jnp.polyval(coeffs, λ * conversion))
+        return (λ / jnp.polyval(coeffs, λ * conversion)) / scale
 
     return lsf
 
@@ -109,9 +112,7 @@ def InterpPixelOffset(dispersion_file: str, λ_unit: u.Unit) -> Callable:
     """
 
     # Load the dispersion curve
-    u.set_enabled_aliases(
-        {'MICRONS': u.micron, 'PIXEL': u.pix, 'RESOLUTION': u.Angstrom / u.micron}
-    )
+    u.set_enabled_aliases({'MICRONS': u.micron, 'PIXEL': u.pix, 'RESOLUTION': u.Angstrom / u.micron})
     disp_tab = Table.read(dispersion_file)
 
     # Convert to JAX arrays in the correct units
@@ -121,8 +122,6 @@ def InterpPixelOffset(dispersion_file: str, λ_unit: u.Unit) -> Callable:
     # Compute Interpolated offset Curve
     @jit
     def pxoff(λ, offset):
-        return offset * jnp.interp(
-            λ, wave, disp, left='extrapolate', right='extrapolate'
-        )
+        return offset * jnp.interp(λ, wave, disp, left='extrapolate', right='extrapolate')
 
     return pxoff
