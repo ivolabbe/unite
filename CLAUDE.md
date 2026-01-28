@@ -77,4 +77,5 @@ Example notebooks in `unite/examples/`
 
 
 ## New Features
-Always keep track of new features implemented, and TODO of new features in unite/TODO.md
+- keep a TODO of new features in unite/TODO.md, add new features, planned changes to the TODO list as needed, and rank features by priority and type
+- always keep track of new features implemented, by ticking them off in the TODO (e.g. keep a 'implemented' and 'todo' section 
