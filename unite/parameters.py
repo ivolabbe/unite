@@ -17,7 +17,8 @@ from unite import defaults
 def configToMatrices(
     config: dict,
 ) -> Tuple[
-    Tuple[List[BCOO], List[BCOO], List[BCOO]], Tuple[jnp.ndarray, List[jnp.ndarray], List[jnp.ndarray]]
+    Tuple[List[BCOO], List[BCOO], List[BCOO]],
+    Tuple[jnp.ndarray, List[jnp.ndarray], List[jnp.ndarray]],
 ]:
     """
     Convert the configuration to sparse matrices for the model
@@ -101,7 +102,10 @@ def configToMatrices(
                         # Iterate again to find the additional components
                         for addSpecies in config['Groups'][dest]['Species']:
                             # Ensure additional component matches the species
-                            if addSpecies['Name'] != species['Name'] or addSpecies['LineType'] != comp:
+                            if (
+                                addSpecies['Name'] != species['Name']
+                                or addSpecies['LineType'] != comp
+                            ):
                                 continue
 
                             # Iterate until we find the right line
@@ -135,7 +139,10 @@ def configToMatrices(
             σ_inds[i_add] = σ_translation[σ_inds[i_add]]
 
     # Split into the origin components
-    orig = [{i: j for i, j in inds.items() if (i not in add_inds)} for inds in (f_inds, z_inds, σ_inds)]
+    orig = [
+        {i: j for i, j in inds.items() if (i not in add_inds)}
+        for inds in (f_inds, z_inds, σ_inds)
+    ]
 
     # Add additional components that are tied to the origin
     for o, inds in zip(orig, (f_inds, z_inds, σ_inds)):
@@ -191,7 +198,8 @@ def configToMatrices(
 
     # Create flux matrices
     f_orig = BCOO(
-        (fluxes_org, list(orig[0].items())), shape=(i, max(orig[0].values()) + 1 if len(orig[0]) else 1)
+        (fluxes_org, list(orig[0].items())),
+        shape=(i, max(orig[0].values()) + 1 if len(orig[0]) else 1),
     ).T
     f_add = (
         BCOO((fluxes_add, list(add[0].items())), shape=(i, max(add[0].values()) + 1)).T
@@ -203,7 +211,10 @@ def configToMatrices(
     orig, add = [
         [
             (
-                BCOO((jnp.ones(len(ind), int), list(ind.items())), shape=(i, max(ind.values()) + 1)).T
+                BCOO(
+                    (jnp.ones(len(ind), int), list(ind.items())),
+                    shape=(i, max(ind.values()) + 1),
+                ).T
                 if len(ind)
                 else jnp.zeros((0, i))
             )
@@ -219,7 +230,10 @@ def configToMatrices(
     # Create the origin to additional matrices
     orig_add = [
         (
-            BCOO((jnp.ones(len(ind), int), list(ind.items())), shape=(a.shape[0], o.shape[0])).T
+            BCOO(
+                (jnp.ones(len(ind), int), list(ind.items())),
+                shape=(a.shape[0], o.shape[0]),
+            ).T
             if len(ind)
             else jnp.zeros((0, o.shape[0]))
         )

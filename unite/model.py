@@ -71,12 +71,20 @@ def multiSpecModel(
 
     # Map linetypes to optimized profile indices, Default to Gaussian (0)
     type_idx = jnp.zeros_like(linetypes, dtype=jnp.int32)
-    type_idx = jnp.where(linetypes == defaults.LINETYPES['lorentzian'], optimized.LORENTZIAN, type_idx)
-    type_idx = jnp.where(linetypes == defaults.LINETYPES['exponential'], optimized.EXPONENTIAL, type_idx)
+    type_idx = jnp.where(
+        linetypes == defaults.LINETYPES['lorentzian'], optimized.LORENTZIAN, type_idx
+    )
+    type_idx = jnp.where(
+        linetypes == defaults.LINETYPES['exponential'], optimized.EXPONENTIAL, type_idx
+    )
 
     # Build the original parameters
     params = {}
-    all_ps = (('flux', priors.flux_prior), ('redshift', priors.redshift_prior), ('fwhm', priors.fwhm_prior))
+    all_ps = (
+        ('flux', priors.flux_prior),
+        ('redshift', priors.redshift_prior),
+        ('fwhm', priors.fwhm_prior),
+    )
     for i, (M_orig, lt_orig, M_add, lt_add, M_orig_add, p) in enumerate(
         zip(orig, lts_orig, add, lts_add, orig_add, all_ps)
     ):
@@ -126,7 +134,9 @@ def multiSpecModel(
         offsets = sample('cont_offset', priors.height_prior(cont_guesses))
 
     # Compute equivalent widths
-    linecont = optimized.linearContinua(centers, cont_centers, angles, offsets, cont_regs).sum(1)
+    linecont = optimized.linearContinua(
+        centers, cont_centers, angles, offsets, cont_regs
+    ).sum(1)
     determ('ew_all', fluxes / (linecont * oneplusz))
 
     # Loop over spectra
@@ -167,11 +177,15 @@ def multiSpecModel(
         # Compute continuum
         continuum = determ(
             f'{spectrum.name}_cont',
-            optimized.linearContinua(wave, cont_centers, angles, offsets, cont_regs_shift).sum(1),
+            optimized.linearContinua(
+                wave, cont_centers, angles, offsets, cont_regs_shift
+            ).sum(1),
         )
 
         # Compute model
-        model = determ(f'{spectrum.name}_model', flux_scale * (lines.sum(1) + continuum))
+        model = determ(
+            f'{spectrum.name}_model', flux_scale * (lines.sum(1) + continuum)
+        )
 
         # Compute likelihood
         sample(f'{spectrum.name}', dist.Normal(model, err), obs=flux)

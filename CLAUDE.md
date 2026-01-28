@@ -76,6 +76,30 @@ Example notebooks in `unite/examples/`
 - Skip magic trailing comma
 
 
+## Validation Framework
+
+The validation framework (`unite/validation.py`) tests the **actual pipeline** end-to-end:
+- Uses real spectra as templates (not synthetic/mocked spectra)
+- Injects lines using the actual LSF from calibration files (`spec.lsf()`)
+- Calls the real `NIRSpecFit()` function
+- Saves config JSON for reproducibility
+
+**Running validation tests:**
+```bash
+pixi run pytest tests/test_validation.py -v
+```
+
+**Important:** When making interface changes to `validation.py`:
+1. Always update the pytest tests in `tests/test_validation.py`
+2. Update the example notebook `examples/uniteplus_validation.ipynb` accordingly
+3. The notebook is for manual inspection; pytest tests are the source of truth
+
+**Validation output:** Use `result.pretty_print()` to display a formatted table showing:
+- Injected vs recovered values
+- Uncertainty intervals (16th/84th percentiles)
+- SNR for each line
+- Pass/fail status per parameter
+
 ## New Features
 - keep a TODO of new features in unite/TODO.md, add new features, planned changes to the TODO list as needed, and rank features by priority and type
-- always keep track of new features implemented, by ticking them off in the TODO (e.g. keep a 'implemented' and 'todo' section 
+- always keep track of new features implemented, by ticking them off in the TODO (e.g. keep a 'implemented' and 'todo' section

@@ -112,7 +112,9 @@ def InterpPixelOffset(dispersion_file: str, λ_unit: u.Unit) -> Callable:
     """
 
     # Load the dispersion curve
-    u.set_enabled_aliases({'MICRONS': u.micron, 'PIXEL': u.pix, 'RESOLUTION': u.Angstrom / u.micron})
+    u.set_enabled_aliases(
+        {'MICRONS': u.micron, 'PIXEL': u.pix, 'RESOLUTION': u.Angstrom / u.micron}
+    )
     disp_tab = Table.read(dispersion_file)
 
     # Convert to JAX arrays in the correct units
@@ -122,6 +124,8 @@ def InterpPixelOffset(dispersion_file: str, λ_unit: u.Unit) -> Callable:
     # Compute Interpolated offset Curve
     @jit
     def pxoff(λ, offset):
-        return offset * jnp.interp(λ, wave, disp, left='extrapolate', right='extrapolate')
+        return offset * jnp.interp(
+            λ, wave, disp, left='extrapolate', right='extrapolate'
+        )
 
     return pxoff

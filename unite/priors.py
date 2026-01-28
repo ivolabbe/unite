@@ -15,7 +15,9 @@ from numpyro import distributions as dist
 from unite import defaults
 
 
-def fwhm_prior(linetypes: jnp.ndarray, orig: Optional[jnp.ndarray] = None) -> dist.Distribution:
+def fwhm_prior(
+    linetypes: jnp.ndarray, orig: Optional[jnp.ndarray] = None
+) -> dist.Distribution:
     """
     Return a fwhm prior based on the linetype
 
@@ -50,7 +52,9 @@ def fwhm_prior(linetypes: jnp.ndarray, orig: Optional[jnp.ndarray] = None) -> di
     return dist.Uniform(low=low, high=high)
 
 
-def redshift_prior(linetypes: jnp.ndarray, orig: Optional[jnp.ndarray] = None) -> dist.Distribution:
+def redshift_prior(
+    linetypes: jnp.ndarray, orig: Optional[jnp.ndarray] = None
+) -> dist.Distribution:
     """
     Return a redshift prior based on the linetype
 
@@ -79,7 +83,9 @@ def redshift_prior(linetypes: jnp.ndarray, orig: Optional[jnp.ndarray] = None) -
     return dist.Uniform(low=low, high=high)
 
 
-def flux_prior(linetypes: jnp.ndarray, orig: Optional[jnp.ndarray] = None) -> dist.Distribution:
+def flux_prior(
+    linetypes: jnp.ndarray, orig: Optional[jnp.ndarray] = None
+) -> dist.Distribution:
     """
     Return a flux prior based on the linetype
 
@@ -140,7 +146,9 @@ def height_prior(height_guess: float) -> dist.Distribution:
     return dist.Uniform(low=low, high=high)
 
 
-def lsf_scale_prior(mean: float = 1.2, sig: float = 0.1, cutoff: float = 3.0) -> dist.Distribution:
+def lsf_scale_prior(
+    mean: float = 1.2, sig: float = 0.1, cutoff: float = 3.0
+) -> dist.Distribution:
     """
     Return a truncated normal prior for the lsf scale
     Centered on 1.2 with a standard deviation of 0.1, but truncated at 3σ
@@ -161,7 +169,9 @@ def lsf_scale_prior(mean: float = 1.2, sig: float = 0.1, cutoff: float = 3.0) ->
         Prior distribution for the lsf scale
     """
 
-    return dist.TruncatedNormal(loc=mean, scale=sig, low=mean - cutoff * sig, high=mean + cutoff * sig)
+    return dist.TruncatedNormal(
+        loc=mean, scale=sig, low=mean - cutoff * sig, high=mean + cutoff * sig
+    )
 
 
 def pixel_offset_prior(mean: float = 0.2, half_width: float = 0.5) -> dist.Distribution:
@@ -203,4 +213,6 @@ def flux_scale_prior(mean=1.1, sig=0.2, cutoff=3.0) -> dist.Distribution:
         Prior distribution for the flux scale
     """
 
-    return dist.TruncatedNormal(loc=mean, scale=sig, low=mean - cutoff * sig, high=mean + cutoff * sig)
+    return dist.TruncatedNormal(
+        loc=mean, scale=sig, low=mean - cutoff * sig, high=mean + cutoff * sig
+    )

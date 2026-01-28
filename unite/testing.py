@@ -68,7 +68,9 @@ def inject_validation_gaussians(
         continuum = float(continuum_level)
 
     opz = 1.0 + spec.redshift_initial
-    centers = np.array([_HA_REST.to(spec.λ_unit).value * opz, _HB_REST.to(spec.λ_unit).value * opz])
+    centers = np.array(
+        [_HA_REST.to(spec.λ_unit).value * opz, _HB_REST.to(spec.λ_unit).value * opz]
+    )
 
     fwhm_kms_arr = np.array(fwhm_kms, dtype=float)
     fwhm = centers * fwhm_kms_arr / C
@@ -87,7 +89,9 @@ def inject_validation_gaussians(
 
     for c, l, f, ls in zip(centers_j, line_fluxes_j, fwhm_j, lsf_j):
         lsf_R = c / ls
-        print(f'Line at {c:.2f} with flux {l:.2f}, FWHM {f:.3f}, LSF {ls:.4f} ({lsf_R:.1f})')
+        print(
+            f'Line at {c:.2f} with flux {l:.2f}, FWHM {f:.3f}, LSF {ls:.4f} ({lsf_R:.1f})'
+        )
     pixints = optimized.integrate(low_j, high_j, centers_j, lsf_j, fwhm_j, type_idx).T
     f_lambda = pixints / (high_j - low_j)[:, jnp.newaxis]
     line_model = f_lambda * line_fluxes_j

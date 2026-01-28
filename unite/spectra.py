@@ -89,7 +89,9 @@ class Spectra:
         self.spectra = [spectrum for spectrum in self.spectra if len(spectrum.wave) > 0]
         self.names = [spectrum.name for spectrum in self.spectra]
 
-    def rescale(self, config: dict, continuum_regions: list, linepad: u.Quantity) -> None:
+    def rescale(
+        self, config: dict, continuum_regions: list, linepad: u.Quantity
+    ) -> None:
         """
         Rescale the errorbars in each region
 
@@ -181,7 +183,9 @@ class NIRSpecSpectra(Spectra):
 
         # Compute the spectrum files
         if 'spectra_directory' in rows.colnames:
-            spectrum_files = [path.join(row['spectra_directory'], row['file']) for row in rows]
+            spectrum_files = [
+                path.join(row['spectra_directory'], row['file']) for row in rows
+            ]
         else:
             spectrum_files = [str(Path(row['file'])) for row in rows]
 
@@ -199,9 +203,16 @@ class NIRSpecSpectra(Spectra):
         ]
 
         # Initialize
-        super().__init__(spectra=spectra, redshift_initial=redshift_initial, λ_unit=λ_unit, fλ_unit=fλ_unit)
+        super().__init__(
+            spectra=spectra,
+            redshift_initial=redshift_initial,
+            λ_unit=λ_unit,
+            fλ_unit=fλ_unit,
+        )
 
-    def rescale(self, config: dict, continuum_regions: list, linepad: u.Quantity) -> None:
+    def rescale(
+        self, config: dict, continuum_regions: list, linepad: u.Quantity
+    ) -> None:
         """
         Rescale the errorbars in each region
 
@@ -293,7 +304,8 @@ class Spectrum:
         # Mask NaN values and store
         mask = np.invert(np.isnan(err))
         for key, array in zip(
-            ['wave', 'low', 'high', 'flux', 'err', 'valid'], [wave, low, high, flux, err, valid]
+            ['wave', 'low', 'high', 'flux', 'err', 'valid'],
+            [wave, low, high, flux, err, valid],
         ):
             setattr(self, key, array[mask])
 
@@ -347,7 +359,12 @@ class Spectrum:
 
         # Compute the mask
         mask = np.logical_or.reduce(
-            np.array([self.coverage(region[0], region[1], partial=False) for region in continuum_regions])
+            np.array(
+                [
+                    self.coverage(region[0], region[1], partial=False)
+                    for region in continuum_regions
+                ]
+            )
         )
 
         # Apply the mask
@@ -466,7 +483,7 @@ class Spectrum:
 
                 n_outliers = np.sum(outliers)
                 if verbose:
-                    print(f"Iteration {i}: found {n_outliers} outliers")
+                    print(f'Iteration {i}: found {n_outliers} outliers')
 
                 if n_outliers == 0:
                     break
@@ -517,7 +534,9 @@ class Spectrum:
         # Return scale that makes residuals have unit variance
         return np.sqrt(χ2_ν)
 
-    def rescale(self, config: dict, continuum_regions: list, linepad: u.Quantity) -> None:
+    def rescale(
+        self, config: dict, continuum_regions: list, linepad: u.Quantity
+    ) -> None:
         """
         Rescale the errorbars in each region
 
@@ -608,7 +627,9 @@ class NIRSpecSpectrum(Spectrum):
         # Compute pixel offset
         disp_dir = resources.files('unite.data.disp')
         disp_file = f'jwst_nirspec_{disperser.lower()}_disp.fits'
-        self.offset = calibration.InterpPixelOffset(disp_dir.joinpath(disp_file), λ_unit)
+        self.offset = calibration.InterpPixelOffset(
+            disp_dir.joinpath(disp_file), λ_unit
+        )
 
         # Load the spectrum from file
         spec = Table.read(spec_file, 'SPEC1D')

@@ -96,13 +96,19 @@ def integrateCauchy(
 
 
 # Pseudo-Voigt profile magic numbers from Thompson+ (1987) DOI:10.1107/S0021889887087090
-_VOIGT_FWHM_CS: Final[jnp.ndarray] = jnp.array([1, 2.69268, 2.42843, 4.47163, 0.07842, 1])
+_VOIGT_FWHM_CS: Final[jnp.ndarray] = jnp.array(
+    [1, 2.69268, 2.42843, 4.47163, 0.07842, 1]
+)
 _VOIGT_ETA_CS: Final[jnp.ndarray] = jnp.array([1.33603, -0.47719, 0.11116])
 
 
 @jit
 def integrateVoigt(
-    low: jnp.ndarray, high: jnp.ndarray, center: jnp.ndarray, fwhm_g: jnp.ndarray, fwhm_γ: jnp.ndarray
+    low: jnp.ndarray,
+    high: jnp.ndarray,
+    center: jnp.ndarray,
+    fwhm_g: jnp.ndarray,
+    fwhm_γ: jnp.ndarray,
 ) -> jnp.ndarray:
     """
     Integrate Voigt emission lines over wavelength bins.
@@ -233,7 +239,11 @@ def _integrandGL(t: jnp.ndarray, a: jnp.ndarray) -> jnp.ndarray:
 
 @jit
 def integrateGaussianLaplace(
-    low: jnp.ndarray, high: jnp.ndarray, center: jnp.ndarray, fwhm_g: jnp.ndarray, fwhm_l: jnp.ndarray
+    low: jnp.ndarray,
+    high: jnp.ndarray,
+    center: jnp.ndarray,
+    fwhm_g: jnp.ndarray,
+    fwhm_l: jnp.ndarray,
 ) -> jnp.ndarray:
     """
     Integrate exponentially modified Gaussian (EMG) emission lines over wavelength bins.
@@ -411,7 +421,9 @@ def linearContinua(
     continuum = jnp.tan(angles) * (λ - cont_center) + offsets
 
     return jnp.where(
-        jnp.logical_and(continuum_regions[:, 0] < λ, λ < continuum_regions[:, 1]), continuum, 0.0
+        jnp.logical_and(continuum_regions[:, 0] < λ, λ < continuum_regions[:, 1]),
+        continuum,
+        0.0,
     )
 
 

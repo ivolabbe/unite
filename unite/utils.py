@@ -20,7 +20,9 @@ from unite import defaults
 from unite.spectra import Spectra, Spectrum
 
 
-def restrictConfig(config: dict, spectra: Spectra, linedet: u.Quantity = defaults.LINEDETECT) -> List:
+def restrictConfig(
+    config: dict, spectra: Spectra, linedet: u.Quantity = defaults.LINEDETECT
+) -> List:
     """
     Restrict the configuration to only include lines that are covered by the spectra
 
@@ -94,7 +96,9 @@ def restrictConfig(config: dict, spectra: Spectra, linedet: u.Quantity = default
             new_lines = []
             for line in species['Lines']:
                 # Compute line wavelength
-                linewav = (line['Wavelength'] * u.Unit(config['Unit'])).to(spectra.λ_unit)
+                linewav = (line['Wavelength'] * u.Unit(config['Unit'])).to(
+                    spectra.λ_unit
+                )
 
                 # Redshift the line
                 linewav = linewav * (1 + spectra.redshift_initial)
@@ -104,7 +108,9 @@ def restrictConfig(config: dict, spectra: Spectra, linedet: u.Quantity = default
                 low, high = (linewav - linewidth).value, (linewav + linewidth).value
 
                 # Check coverage
-                if jnp.logical_or.reduce(jnp.array([s.coverage(low, high).any() for s in spectra.spectra])):
+                if jnp.logical_or.reduce(
+                    jnp.array([s.coverage(low, high).any() for s in spectra.spectra])
+                ):
                     # dont add lines outside config region
                     # if 'Region' in config:
                     #     if (low < config_region[0]) | (high > config_region[1]):
@@ -156,9 +162,9 @@ def download_spectra(
     spectrum_files: list,
     table_csv: str | None = None,
     #    default_url_prefix: str = "https://zenodo.org/records/15472354/files/",
-    default_url_prefix: str = "https://s3.amazonaws.com/msaexp-nirspec/extractions",
+    default_url_prefix: str = 'https://s3.amazonaws.com/msaexp-nirspec/extractions',
     # Updated 19 Jan 2026
-    version: str = "v4.5",
+    version: str = 'v4.5',
     spectra_directory: str | None = None,
 ) -> Table:
     """
@@ -184,7 +190,7 @@ def download_spectra(
     """
 
     #    FITS_URL = "https://s3.amazonaws.com/msaexp-nirspec/extractions/{root}/{file}"
-    FITS_URL = f"{default_url_prefix}/{{root}}/{{file}}"
+    FITS_URL = f'{default_url_prefix}/{{root}}/{{file}}'
 
     # Normalize paths; allow passing bare filenames with a target directory
     normalized_paths = []
@@ -200,7 +206,9 @@ def download_spectra(
     #     return None
 
     if table_csv is None:
-        table_csv = os.path.join(default_url_prefix, f'dja_msaexp_emission_lines_{version}.csv.gz')
+        table_csv = os.path.join(
+            default_url_prefix, f'dja_msaexp_emission_lines_{version}.csv.gz'
+        )
 
     p = Path(table_csv)
     if p.exists():
@@ -218,7 +226,7 @@ def download_spectra(
         fname = p.name
         row_match = tab[tab['file'] == fname]
         if len(row_match) == 0:
-            raise ValueError(f"Spectrum file {fname} not found in table {table_csv}")
+            raise ValueError(f'Spectrum file {fname} not found in table {table_csv}')
 
         if not p.exists():
             url = FITS_URL.format(**row_match[0])

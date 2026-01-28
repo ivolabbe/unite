@@ -38,16 +38,17 @@ def NIRSpecFit(
     config: dict,
     rows: Table | None = None,  # provide either rows
     spectra: NIRSpecSpectra | None = None,  # or spectra directly
-    output_directory: str = "out",
+    output_directory: str = 'out',
     N: int = 500,
     num_warmup: int = 250,
     backend: str = 'MCMC',
     rescale_errors=False,
     verbose=True,
 ) -> None:
-
     # Get the model arguments
-    config, model_args = NIRSpecModelArgs(config, rows=rows, spectra=spectra, rescale_errors=rescale_errors)
+    config, model_args = NIRSpecModelArgs(
+        config, rows=rows, spectra=spectra, rescale_errors=rescale_errors
+    )
 
     # Get the random key
     rng_key = random.PRNGKey(0)
@@ -55,7 +56,9 @@ def NIRSpecFit(
     # Fit the data
     match backend:
         case 'MCMC':
-            samples, extras = MCMCFit(model_args, rng_key, N=N, num_warmup=num_warmup, verbose=verbose)
+            samples, extras = MCMCFit(
+                model_args, rng_key, N=N, num_warmup=num_warmup, verbose=verbose
+            )
         case 'NS':
             samples, extras = NSFit(model_args, rng_key)
         case 'MAP':
@@ -75,7 +78,10 @@ def NIRSpecFit(
 
 
 def NIRSpecModelArgs(
-    config: dict, rows: Table | None = None, spectra: NIRSpecSpectra | None = None, rescale_errors=True
+    config: dict,
+    rows: Table | None = None,
+    spectra: NIRSpecSpectra | None = None,
+    rescale_errors=True,
 ) -> Tuple:
     """
     Get the model arguments for the NIRSpec data.
@@ -111,7 +117,9 @@ def NIRSpecModelArgs(
     cont_regs, cont_guesses = initial.computeContinuumRegions(config, spectra)
 
     # Compute Line Centers and Equalized estimates
-    line_centers, line_estimates_eq = initial.linesFluxesGuess(config, spectra, cont_regs, cont_guesses)
+    line_centers, line_estimates_eq = initial.linesFluxesGuess(
+        config, spectra, cont_regs, cont_guesses
+    )
 
     # Restrict spectra to continuum regions and rescale errorbars in each region
     spectra.restrictAndRescale(config, cont_regs, rescale_errors=rescale_errors)
@@ -133,7 +141,11 @@ def NIRSpecModelArgs(
 
 
 def MCMCFit(
-    model_args: tuple, rng_key: random.PRNGKey, N: int = 500, num_warmup: int = 250, verbose=True
+    model_args: tuple,
+    rng_key: random.PRNGKey,
+    N: int = 500,
+    num_warmup: int = 250,
+    verbose=True,
 ) -> Tuple[Dict, Dict]:
     """
     Fit the NIRSpec data with MCMC.
@@ -157,7 +169,9 @@ def MCMCFit(
 
     # MCMC
     kernel = infer.NUTS(multiSpecModel)
-    mcmc = infer.MCMC(kernel, num_samples=N, num_warmup=num_warmup, progress_bar=verbose)
+    mcmc = infer.MCMC(
+        kernel, num_samples=N, num_warmup=num_warmup, progress_bar=verbose
+    )
     mcmc.run(rng_key, *model_args)
 
     # Get the samples
@@ -167,13 +181,17 @@ def MCMCFit(
     logL = computeProbs(samples, model_args)
 
     # Compute the WAIC
-    waic = -2 * (np.log(np.exp(logL).mean(axis=0)).sum() - logL.var(axis=0, ddof=1).sum())
+    waic = -2 * (
+        np.log(np.exp(logL).mean(axis=0)).sum() - logL.var(axis=0, ddof=1).sum()
+    )
     extras = {'WAIC': waic}
 
     return samples, extras
 
 
-def NSFit(model_args: tuple, rng_key: random.PRNGKey, N: int = 1000) -> Tuple[Dict, Dict]:
+def NSFit(
+    model_args: tuple, rng_key: random.PRNGKey, N: int = 1000
+) -> Tuple[Dict, Dict]:
     """
     Fit the NIRSpec data with Nested Sampling.
 
@@ -192,13 +210,21 @@ def NSFit(model_args: tuple, rng_key: random.PRNGKey, N: int = 1000) -> Tuple[Di
     with trace() as tr:
         with seed(multiSpecModel, rng_seed=rng_key):
             multiSpecModel(*model_args)
-    nv = sum([v['value'].size for v in tr.values() if v['type'] == 'sample' and not v['is_observed']])
+    nv = sum(
+        [
+            v['value'].size
+            for v in tr.values()
+            if v['type'] == 'sample' and not v['is_observed']
+        ]
+    )
 
     # Nested Sampling
     constructor_kwargs = {'num_live_points': 50 * (nv + 1), 'max_samples': 50000}
     termination_kwargs = {'dlogZ': 0.01}
     NS = NestedSampler(
-        model=multiSpecModel, constructor_kwargs=constructor_kwargs, termination_kwargs=termination_kwargs
+        model=multiSpecModel,
+        constructor_kwargs=constructor_kwargs,
+        termination_kwargs=termination_kwargs,
     )
     NS.run(rng_key, *model_args)
 
@@ -209,12 +235,17 @@ def NSFit(model_args: tuple, rng_key: random.PRNGKey, N: int = 1000) -> Tuple[Di
     _ = computeProbs(samples, model_args)
 
     # Add log evidence to samples
-    extras = {'logZ': float(NS._results.log_Z_mean), 'logZ_err': float(NS._results.log_Z_uncert)}
+    extras = {
+        'logZ': float(NS._results.log_Z_mean),
+        'logZ_err': float(NS._results.log_Z_uncert),
+    }
 
     return samples, extras
 
 
-def MAPFit(model_args: tuple, rng_key: random.PRNGKey, N: int = 1000) -> Tuple[Dict, Dict]:
+def MAPFit(
+    model_args: tuple, rng_key: random.PRNGKey, N: int = 1000
+) -> Tuple[Dict, Dict]:
     """
     Fit the NIRSpec data with Maximum A Posteriori estimation.
 
@@ -253,7 +284,8 @@ def MAPFit(model_args: tuple, rng_key: random.PRNGKey, N: int = 1000) -> Tuple[D
     samples = {
         name: jnp.array(site['value'])[None, ...]  # Add sample dimension
         for name, site in traced_model.items()
-        if site['type'] in ['deterministic', 'sample'] and not site.get('is_observed', False)
+        if site['type'] in ['deterministic', 'sample']
+        and not site.get('is_observed', False)
     }
 
     return samples, {'losses': losses}
@@ -268,7 +300,9 @@ def computeProbs(samples: dict, model_args: tuple) -> np.ndarray:
     samples['logL'] = logL.sum(1)
 
     # Compute the log density
-    logP = vmap(lambda s: infer.util.log_density(multiSpecModel, model_args, {}, s)[0])(samples)
+    logP = vmap(lambda s: infer.util.log_density(multiSpecModel, model_args, {}, s)[0])(
+        samples
+    )
     samples['logP'] = np.array(logP)
 
     return logL
@@ -297,7 +331,9 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
 
     # Create outputs
     colnames = [
-        n for n in ['lsf_scale', 'PRISM_flux', 'PRISM_offset', 'logL', 'logP'] if n in samples.keys()
+        n
+        for n in ['lsf_scale', 'PRISM_flux', 'PRISM_offset', 'logL', 'logP']
+        if n in samples.keys()
     ]
     out = Table([samples[name] for name in colnames], names=colnames)
 
@@ -305,7 +341,10 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
     samples['cont_regs'] = np.array(cont_regs)
     if hasattr(spectrum, 'errscales'):
         samples.update(
-            {f'{spectrum.name}_errscales': np.array(spectrum.errscales) for spectrum in spectra.spectra}
+            {
+                f'{spectrum.name}_errscales': np.array(spectrum.errscales)
+                for spectrum in spectra.spectra
+            }
         )
 
     # Save all samples as npz
@@ -327,7 +366,12 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
     # Append line parameter samples
     for colname, unit in zip(
         ['redshift', 'flux', 'fwhm', 'ew'],
-        [u.dimensionless_unscaled, u.Unit(1e-20 * u.erg / u.cm**2 / u.s), u.km / u.s, u.AA],
+        [
+            u.dimensionless_unscaled,
+            u.Unit(1e-20 * u.erg / u.cm**2 / u.s),
+            u.km / u.s,
+            u.AA,
+        ],
     ):
         data = np.array(samples[f'{colname}_all'].T.tolist()) * unit
         out_part = Table(data.T, names=[f'{line}_{colname}' for line in line_names])
@@ -336,7 +380,9 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
     # Append LSF samples
     for spectrum in spectra.spectra:
         data = np.array(samples[f'{spectrum.name}_lsf'].T.tolist()) * spectra.λ_unit
-        out_part = Table(data.T, names=[f'{spectrum.name}_{line}_lsf' for line in line_names])
+        out_part = Table(
+            data.T, names=[f'{spectrum.name}_{line}_lsf' for line in line_names]
+        )
         out = hstack([out, out_part])
 
     # Create extra table
@@ -344,7 +390,11 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
 
     # Create HDUList
     hdul = fits.HDUList(
-        [fits.PrimaryHDU(), fits.BinTableHDU(out, name='PARAMS'), fits.BinTableHDU(extra, name='EXTRAS')]
+        [
+            fits.PrimaryHDU(),
+            fits.BinTableHDU(out, name='PARAMS'),
+            fits.BinTableHDU(extra, name='EXTRAS'),
+        ]
     )
 
     # Save the summary
@@ -395,15 +445,24 @@ def get_components_fit(
         idx = jnp.argmax(samples['logP'])
         params = {k: v[idx] for k, v in samples.items()}
     else:
-        raise ValueError(f"Unknown method: {method}")
+        raise ValueError(f'Unknown method: {method}')
 
     # Filter out deterministic sites to force re-computation
     # This prevents shape mismatches if model_args (e.g. pixel grid) changed
     excluded_suffixes = ('_model', '_lines', '_cont', '_lsf', '_z_all')
-    excluded_keys = {'flux_all', 'redshift_all', 'fwhm_all', 'ew_all', 'cont_center', 'logP'}
+    excluded_keys = {
+        'flux_all',
+        'redshift_all',
+        'fwhm_all',
+        'ew_all',
+        'cont_center',
+        'logP',
+    }
 
     params = {
-        k: v for k, v in params.items() if k not in excluded_keys and not k.endswith(excluded_suffixes)
+        k: v
+        for k, v in params.items()
+        if k not in excluded_keys and not k.endswith(excluded_suffixes)
     }
 
     # Run model with trace
@@ -430,6 +489,11 @@ def get_components_fit(
             lines = lines * flux_scale
             continuum = continuum * flux_scale
 
-        components[spec.name] = {'wave': wave, 'lines': lines, 'continuum': continuum, 'model': model}
+        components[spec.name] = {
+            'wave': wave,
+            'lines': lines,
+            'continuum': continuum,
+            'model': model,
+        }
 
     return components, config

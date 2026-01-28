@@ -54,13 +54,18 @@ def linesFluxesGuess(
     # Compute the line centers and relative strengths
     centers, strengths = jnp.array(
         [
-            (li['Wavelength'], li['RelStrength'] if li['RelStrength'] is not None else 1)
+            (
+                li['Wavelength'],
+                li['RelStrength'] if li['RelStrength'] is not None else 1,
+            )
             for g in config['Groups'].values()
             for s in g['Species']
             for li in s['Lines']
         ]
     ).T
-    centers = jnp.array(u.Quantity(centers, config['Unit']).to(spectra.λ_unit))  # Correct units
+    centers = jnp.array(
+        u.Quantity(centers, config['Unit']).to(spectra.λ_unit)
+    )  # Correct units
 
     # Compute the relevant continuum guesses
     opz = 1 + spectra.redshift_initial
@@ -75,7 +80,12 @@ def linesFluxesGuess(
     # Get the guesses
     guesses = jnp.array(
         [
-            max([lineFluxGuess(spectrum, center, line_cont, inner) for spectrum in spectra.spectra])
+            max(
+                [
+                    lineFluxGuess(spectrum, center, line_cont, inner)
+                    for spectrum in spectra.spectra
+                ]
+            )
             for center, line_cont in zip(centers, line_conts)
         ]
     )
@@ -100,7 +110,9 @@ def linesFluxesGuess(
 
 
 # Line Flux Guess
-def lineFluxGuess(spectrum: Spectrum, center: float, line_cont: float, inner: u.Quantity) -> float:
+def lineFluxGuess(
+    spectrum: Spectrum, center: float, line_cont: float, inner: u.Quantity
+) -> float:
     """
     Compute the line flux guess as the sum of the flux in the inner region minus the continuum region guess
 
@@ -133,7 +145,10 @@ def lineFluxGuess(spectrum: Spectrum, center: float, line_cont: float, inner: u.
         imask = True
 
     # Estimate flux as maximum deviation from zero times the width of the region
-    flux = (jnp.abs(spectrum.flux[imask]).max() * (spectrum.high[imask] - spectrum.low[imask])).sum()
+    flux = (
+        jnp.abs(spectrum.flux[imask]).max()
+        * (spectrum.high[imask] - spectrum.low[imask])
+    ).sum()
 
     # If mask is empty, negate the sign
     if empty:
@@ -195,7 +210,9 @@ def computeContinuumRegions(
     #         for reg in cont_regs
     #     ]
 
-    cont_regs_rest = jnp.array([cont_regs.to(spectra.λ_unit).value for cont_regs in cont_regs])
+    cont_regs_rest = jnp.array(
+        [cont_regs.to(spectra.λ_unit).value for cont_regs in cont_regs]
+    )
     cont_regs_obs = cont_regs_rest * (1 + spectra.redshift_initial)
 
     return cont_regs_obs, continuumHeightGuesses(cont_regs_obs, config, spectra)
@@ -237,7 +254,9 @@ def continuumHeightGuesses(
         [
             max(
                 [
-                    continuumHeightGuess(config, continuum_regions, spectrum, linepad, sigma)
+                    continuumHeightGuess(
+                        config, continuum_regions, spectrum, linepad, sigma
+                    )
                     for spectrum in spectra.spectra
                 ]
             )
@@ -248,7 +267,11 @@ def continuumHeightGuesses(
 
 # Continuum Height Guess
 def continuumHeightGuess(
-    config: dict, continuum_region: jnp.ndarray, spectrum: Spectrum, linepad: u.Quantity, sigma: float
+    config: dict,
+    continuum_region: jnp.ndarray,
+    spectrum: Spectrum,
+    linepad: u.Quantity,
+    sigma: float,
 ) -> jnp.ndarray:
     """
     Guess the continuum height for a spectrum

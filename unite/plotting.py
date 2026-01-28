@@ -55,7 +55,7 @@ def plotRegion(
     region: Tuple[float, float],
     redshift: float,
     line_centers: jnp.ndarray,
-    spectrum_name: str = "",
+    spectrum_name: str = '',
     plot_kwargs: dict | None = None,
     show_ylabel: bool = True,
     show_xlabel: bool = False,
@@ -89,7 +89,7 @@ def plotRegion(
         ax.plot(wave[mask], m[mask], color='#A40122', alpha=1, lw=2, ds='steps-mid')
     else:
         print(
-            f"Warning: Model samples shape {model_samples.shape} does not match wave shape {wave.shape}. Skipping samples plot."
+            f'Warning: Model samples shape {model_samples.shape} does not match wave shape {wave.shape}. Skipping samples plot.'
         )
 
     # Add zero line for reference
@@ -170,24 +170,35 @@ def plotRegion(
 
                 # Check visibility in mask
                 if jnp.max(s_flux[mask]) > 1e-10 or jnp.min(s_flux[mask]) < -1e-10:
-                    ax.plot(wave[mask], s_flux[mask], color=color, linestyle=linestyle, alpha=0.8, lw=1.5)
+                    ax.plot(
+                        wave[mask],
+                        s_flux[mask],
+                        color=color,
+                        linestyle=linestyle,
+                        alpha=0.8,
+                        lw=1.5,
+                    )
 
     # Optional scales
-    if "yscale" in plot_kwargs:
-        yscale = plot_kwargs["yscale"]
+    if 'yscale' in plot_kwargs:
+        yscale = plot_kwargs['yscale']
         if isinstance(yscale, tuple):
             ax.set_yscale(yscale[0], **yscale[1])
         else:
             ax.set_yscale(yscale)
-    if "xscale" in plot_kwargs:
-        xscale = plot_kwargs["xscale"]
+    if 'xscale' in plot_kwargs:
+        xscale = plot_kwargs['xscale']
         if isinstance(xscale, tuple):
             ax.set_xscale(xscale[0], **xscale[1])
         else:
             ax.set_xscale(xscale)
-    if "ylim" in plot_kwargs:
-        y_bottom = plot_kwargs["ylim"][0]
-        y_top = ax.get_ylim()[1] if len(plot_kwargs["ylim"]) == 1 else plot_kwargs["ylim"][1]
+    if 'ylim' in plot_kwargs:
+        y_bottom = plot_kwargs['ylim'][0]
+        y_top = (
+            ax.get_ylim()[1]
+            if len(plot_kwargs['ylim']) == 1
+            else plot_kwargs['ylim'][1]
+        )
         ax.set_ylim(y_bottom, y_top)
     elif ax.get_yscale() in ['linear', 'symlog']:
         ax.set_ylim(bottom=0)
@@ -200,7 +211,15 @@ def plotRegion(
 
     # Disperser text
     if spectrum_name:
-        ax.text(0.02, 0.95, spectrum_name, transform=ax.transAxes, va='top', ha='left', fontsize=12)
+        ax.text(
+            0.02,
+            0.95,
+            spectrum_name,
+            transform=ax.transAxes,
+            va='top',
+            ha='left',
+            fontsize=12,
+        )
 
     ax.set(xlim=region)
 
@@ -260,8 +279,10 @@ def plotRegion(
     ax.minorticks_on()
 
     # Disable minor ticks for symlog
-    yscale = plot_kwargs.get("yscale", "linear")
-    is_symlog = (isinstance(yscale, tuple) and yscale[0] == 'symlog') or (yscale == 'symlog')
+    yscale = plot_kwargs.get('yscale', 'linear')
+    is_symlog = (isinstance(yscale, tuple) and yscale[0] == 'symlog') or (
+        yscale == 'symlog'
+    )
 
     if not is_symlog:
         ax.yaxis.set_minor_locator(AutoMinorLocator())
@@ -270,12 +291,16 @@ def plotRegion(
     rest_ax.minorticks_on()
     rest_ax.xaxis.set_minor_locator(AutoMinorLocator())
 
-    tick_labelsize = plot_kwargs.get("tick_labelsize", 12)
-    tick_length = plot_kwargs.get("tick_length", 6)
-    tick_width = plot_kwargs.get("tick_width", 1.1)
+    tick_labelsize = plot_kwargs.get('tick_labelsize', 12)
+    tick_length = plot_kwargs.get('tick_length', 6)
+    tick_width = plot_kwargs.get('tick_width', 1.1)
 
     ax.tick_params(
-        axis='both', which='major', labelsize=tick_labelsize, length=tick_length, width=tick_width
+        axis='both',
+        which='major',
+        labelsize=tick_labelsize,
+        length=tick_length,
+        width=tick_width,
     )
     ax.tick_params(axis='both', which='minor', length=tick_length / 2, width=tick_width)
 
@@ -286,7 +311,9 @@ def plotRegion(
         length=tick_length * 0.6,
         width=tick_width * 0.8,
     )
-    rest_ax.tick_params(axis='x', which='minor', length=tick_length * 0.3, width=tick_width * 0.8)
+    rest_ax.tick_params(
+        axis='x', which='minor', length=tick_length * 0.3, width=tick_width * 0.8
+    )
 
     if resid_ax is not None:
         resid = (flux[mask] - m[mask]) / err[mask]
@@ -299,7 +326,7 @@ def plotRegion(
         # Calculate Chi2 and WAIC
         chi2 = jnp.sum(resid**2)
 
-        waic_str = ""
+        waic_str = ''
         if model_samples.shape[1] == len(wave):
             ms = model_samples[:, mask]
             y = flux[mask]
@@ -316,12 +343,12 @@ def plotRegion(
             p_waic = jnp.sum(jnp.var(LL, axis=0))
 
             waic = -2 * (lppd - p_waic)
-            waic_str = f"\nWAIC = {waic:.1f}"
+            waic_str = f'\nWAIC = {waic:.1f}'
 
         resid_ax.text(
             0.02,
             0.92,
-            f"$\chi^2$ = {chi2:.1f}{waic_str}",
+            f'$\chi^2$ = {chi2:.1f}{waic_str}',
             transform=resid_ax.transAxes,
             va='top',
             ha='left',
@@ -337,9 +364,15 @@ def plotRegion(
         resid_ax.yaxis.set_minor_locator(AutoMinorLocator())
 
         resid_ax.tick_params(
-            axis='both', which='major', labelsize=tick_labelsize, length=tick_length, width=tick_width
+            axis='both',
+            which='major',
+            labelsize=tick_labelsize,
+            length=tick_length,
+            width=tick_width,
         )
-        resid_ax.tick_params(axis='both', which='minor', length=tick_length / 2, width=tick_width)
+        resid_ax.tick_params(
+            axis='both', which='minor', length=tick_length / 2, width=tick_width
+        )
 
         if show_xlabel:
             resid_ax.set_xlabel(r'$\lambda$ (Observed) [$\mu$m]')
@@ -399,7 +432,9 @@ def plotResults(
 
     # Respect provided model_args; only rebuild if missing
     if model_args is None:
-        _, model_args = NIRSpecModelArgs(config, rows=rows, spectra=spectra, rescale_errors=rescale_errors)
+        _, model_args = NIRSpecModelArgs(
+            config, rows=rows, spectra=spectra, rescale_errors=rescale_errors
+        )
 
     # Respect provided samples; only load from disk if missing
     if samples is None:
@@ -429,7 +464,12 @@ def plotResults(
     best_model_idx = samples['logP'].argmax()
 
     # Initialize data return structure
-    data = {'samples': samples, 'components': components, 'best_model_idx': best_model_idx, 'spectra': {}}
+    data = {
+        'samples': samples,
+        'components': components,
+        'best_model_idx': best_model_idx,
+        'spectra': {},
+    }
 
     for i, spectrum in enumerate(spectra.spectra):
         _, wave, _, flux, err = spectrum()
@@ -446,18 +486,20 @@ def plotResults(
 
         # Symlog default
         current_plot_kwargs = plot_kwargs.copy()
-        if "yscale" not in current_plot_kwargs:
+        if 'yscale' not in current_plot_kwargs:
             med = np.nanmedian(flux)
             if med <= 0 or np.isnan(med):
                 med = 1.0
             #            current_plot_kwargs["yscale"] = ("symlog", {"linthresh": med})
-            current_plot_kwargs["yscale"] = "linear"
+            current_plot_kwargs['yscale'] = 'linear'
 
         for j in range(Nregs):
             cont_reg = cont_regs[j]
 
             # Create inner grid for main plot + residual
-            inner_grid = outer_grid[i, j].subgridspec(2, 1, height_ratios=[4, 1], hspace=0)
+            inner_grid = outer_grid[i, j].subgridspec(
+                2, 1, height_ratios=[4, 1], hspace=0
+            )
             ax = fig.add_subplot(inner_grid[0])
             resid_ax = fig.add_subplot(inner_grid[1], sharex=ax)
 
@@ -485,7 +527,9 @@ def plotResults(
             if i != Nspec - 1:
                 resid_ax.tick_params(labelbottom=False)
 
-    fig.supylabel(rf'$f_\lambda$ [{spectrum.fλ_unit.to_string(format="latex", fraction=False)}]')
+    fig.supylabel(
+        rf'$f_\lambda$ [{spectrum.fλ_unit.to_string(format="latex", fraction=False)}]'
+    )
     fig.supxlabel(
         rf'$\lambda$ (Observed) [{spectrum.λ_unit.to_string(format="latex", fraction=False)}]',
         y=-0.01,
@@ -493,7 +537,10 @@ def plotResults(
         fontsize='medium',
     )
     fig.suptitle(
-        rf'$\lambda$ (Rest) [{spectrum.λ_unit:latex_inline}]', y=1.015, va='center', fontsize='medium'
+        rf'$\lambda$ (Rest) [{spectrum.λ_unit:latex_inline}]',
+        y=1.015,
+        va='center',
+        fontsize='medium',
     )
     fig.text(
         0.5,
@@ -505,7 +552,11 @@ def plotResults(
     )
 
     fig.savefig(
-        os.path.join(f'{output_dir}/Plots', f'{rows[0]["root"]}-{rows[0]["srcid"]}{cname}_fit.png'), dpi=300
+        os.path.join(
+            f'{output_dir}/Plots',
+            f'{rows[0]["root"]}-{rows[0]["srcid"]}{cname}_fit.png',
+        ),
+        dpi=300,
     )
     pyplot.close(fig)
 
@@ -562,7 +613,9 @@ def plotRegionSingle(
     if model_args is None:
         from unite.fitting import NIRSpecModelArgs
 
-        _, model_args = NIRSpecModelArgs(config, rows=rows, rescale_errors=rescale_errors)
+        _, model_args = NIRSpecModelArgs(
+            config, rows=rows, rescale_errors=rescale_errors
+        )
 
     # Respect provided samples; only load from disk if missing
     if samples is None:
@@ -644,7 +697,9 @@ def plotLines(ax, config, model_args) -> None:
             for line in species['Lines']:
                 # Get the line center
                 line_center = (
-                    (line['Wavelength'] * oneplusz * u.Unit(config['Unit'])).to(spectra.λ_unit).value
+                    (line['Wavelength'] * oneplusz * u.Unit(config['Unit']))
+                    .to(spectra.λ_unit)
+                    .value
                 )
 
                 # Check if line is in the axis limits

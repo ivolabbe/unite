@@ -69,6 +69,7 @@ pandas = ">=2.3.3,<3"
 ipykernel = ">=7.1.0,<8"
 setuptools = ">=80.9.0,<81"
 ipywidgets = ">=8.1.8,<9"
+pytest = ">=9.0.2,<10"
 
 [tool.pixi.pypi-dependencies]
 unite = { path = ".", editable = true }
