@@ -314,6 +314,7 @@ class ValidationSuite:
         rescale_errors: bool = False,
         verbose: bool = True,
         save_config: bool = True,
+        model_version: str = 'v2',
     ) -> dict:
         """Run the actual UNITE fitting pipeline on injected spectra.
 
@@ -331,6 +332,8 @@ class ValidationSuite:
             Print progress.
         save_config : bool
             Save config JSON to output directory.
+        model_version : str
+            Model version to use ('v1' or 'v2'), default 'v2'.
 
         Returns
         -------
@@ -365,6 +368,7 @@ class ValidationSuite:
             num_warmup=num_warmup,
             rescale_errors=rescale_errors,
             verbose=verbose,
+            model_version=model_version,
         )
 
         # Load samples from saved results

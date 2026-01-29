@@ -26,9 +26,10 @@ import numpy as np
 from jax import random, vmap, numpy as jnp
 
 # unite
-from unite.model import multiSpecModel
+from unite.model import multiSpecModel, multiSpecModelV2
 from unite.spectra import NIRSpecSpectra
 from unite import utils, initial, parameters
+from unite.continuum import LinearContinuum
 
 # Plotting packages
 from matplotlib import pyplot
@@ -44,10 +45,11 @@ def NIRSpecFit(
     backend: str = 'MCMC',
     rescale_errors=False,
     verbose=True,
+    model_version: str = 'v2',
 ) -> None:
     # Get the model arguments
     config, model_args = NIRSpecModelArgs(
-        config, rows=rows, spectra=spectra, rescale_errors=rescale_errors
+        config, rows=rows, spectra=spectra, rescale_errors=rescale_errors, model_version=model_version
     )
 
     # Get the random key
@@ -57,13 +59,13 @@ def NIRSpecFit(
     match backend:
         case 'MCMC':
             samples, extras = MCMCFit(
-                model_args, rng_key, N=N, num_warmup=num_warmup, verbose=verbose
+                model_args, rng_key, N=N, num_warmup=num_warmup, verbose=verbose, model_version=model_version
             )
         case 'NS':
-            samples, extras = NSFit(model_args, rng_key)
+            samples, extras = NSFit(model_args, rng_key, model_version=model_version)
         case 'MAP':
             print('Warning, Experimental, Do Not Use')
-            samples, extras = MAPFit(model_args, rng_key)
+            samples, extras = MAPFit(model_args, rng_key, model_version=model_version)
         case _:
             raise ValueError(f'Unknown backend: {backend}')
 
@@ -82,6 +84,7 @@ def NIRSpecModelArgs(
     rows: Table | None = None,
     spectra: NIRSpecSpectra | None = None,
     rescale_errors=True,
+    model_version: str = 'v2',
 ) -> Tuple:
     """
     Get the model arguments for the NIRSpec data.
@@ -92,6 +95,8 @@ def NIRSpecModelArgs(
         Configuration dictionary
     rows : Table
         Table of the rows
+    model_version : str
+        Model version to use ('v1' or 'v2'), default 'v2'
 
     Returns
     -------
@@ -128,16 +133,31 @@ def NIRSpecModelArgs(
     if len(spectra.spectra) == 0:
         raise ValueError('No Valid Data')
 
-    # Model Args
-    return config, (
-        spectra,
-        matrices,
-        linetypes_all,
-        line_centers,
-        line_estimates_eq,
-        cont_regs,
-        cont_guesses,
-    )
+    # Model Args for V1
+    if model_version == 'v1':
+        return config, (
+            spectra,
+            matrices,
+            linetypes_all,
+            line_centers,
+            line_estimates_eq,
+            cont_regs,
+            cont_guesses,
+        )
+    # Model Args for V2
+    elif model_version == 'v2':
+        continuum_model = LinearContinuum(cont_guesses)
+        return config, (
+            spectra,
+            matrices,
+            linetypes_all,
+            line_centers,
+            line_estimates_eq,
+            cont_regs,
+            continuum_model,
+        )
+    else:
+        raise ValueError(f'Unknown model version: {model_version}')
 
 
 def MCMCFit(
@@ -146,6 +166,7 @@ def MCMCFit(
     N: int = 500,
     num_warmup: int = 250,
     verbose=True,
+    model_version: str = 'v2',
 ) -> Tuple[Dict, Dict]:
     """
     Fit the NIRSpec data with MCMC.
@@ -160,6 +181,8 @@ def MCMCFit(
         Number of samples, by default 500
     verbose : bool, optional
         Verbose, by default True
+    model_version : str
+        Model version to use ('v1' or 'v2'), default 'v2'
 
     Returns
     -------
@@ -167,8 +190,11 @@ def MCMCFit(
         MCMC object
     """
 
+    # Select model
+    model_fn = multiSpecModel if model_version == 'v1' else multiSpecModelV2
+
     # MCMC
-    kernel = infer.NUTS(multiSpecModel)
+    kernel = infer.NUTS(model_fn)
     mcmc = infer.MCMC(
         kernel, num_samples=N, num_warmup=num_warmup, progress_bar=verbose
     )
@@ -178,7 +204,7 @@ def MCMCFit(
     samples = mcmc.get_samples()
 
     # Compute relevant probabilities
-    logL = computeProbs(samples, model_args)
+    logL = computeProbs(samples, model_args, model_version=model_version)
 
     # Compute the WAIC
     waic = -2 * (
@@ -190,7 +216,7 @@ def MCMCFit(
 
 
 def NSFit(
-    model_args: tuple, rng_key: random.PRNGKey, N: int = 1000
+    model_args: tuple, rng_key: random.PRNGKey, N: int = 1000, model_version: str = 'v2'
 ) -> Tuple[Dict, Dict]:
     """
     Fit the NIRSpec data with Nested Sampling.
@@ -198,6 +224,8 @@ def NSFit(
     Parameters
     ----------
     model_args : tuple
+    model_version : str
+        Model version to use ('v1' or 'v2'), default 'v2'
 
     Returns
     -------
@@ -206,10 +234,13 @@ def NSFit(
 
     from numpyro.contrib.nested_sampling import NestedSampler
 
+    # Select model
+    model_fn = multiSpecModel if model_version == 'v1' else multiSpecModelV2
+
     # Get number of variables
     with trace() as tr:
-        with seed(multiSpecModel, rng_seed=rng_key):
-            multiSpecModel(*model_args)
+        with seed(model_fn, rng_seed=rng_key):
+            model_fn(*model_args)
     nv = sum(
         [
             v['value'].size
@@ -222,7 +253,7 @@ def NSFit(
     constructor_kwargs = {'num_live_points': 50 * (nv + 1), 'max_samples': 50000}
     termination_kwargs = {'dlogZ': 0.01}
     NS = NestedSampler(
-        model=multiSpecModel,
+        model=model_fn,
         constructor_kwargs=constructor_kwargs,
         termination_kwargs=termination_kwargs,
     )
@@ -232,7 +263,7 @@ def NSFit(
     samples = NS.get_samples(rng_key, N)
 
     # Compute relevant probabilities
-    _ = computeProbs(samples, model_args)
+    _ = computeProbs(samples, model_args, model_version=model_version)
 
     # Add log evidence to samples
     extras = {
@@ -244,7 +275,7 @@ def NSFit(
 
 
 def MAPFit(
-    model_args: tuple, rng_key: random.PRNGKey, N: int = 1000
+    model_args: tuple, rng_key: random.PRNGKey, N: int = 1000, model_version: str = 'v2'
 ) -> Tuple[Dict, Dict]:
     """
     Fit the NIRSpec data with Maximum A Posteriori estimation.
@@ -257,6 +288,8 @@ def MAPFit(
         JAX random key
     num_steps : int, optional
         Number of optimization steps
+    model_version : str
+        Model version to use ('v1' or 'v2'), default 'v2'
 
     Returns
     -------
@@ -264,10 +297,13 @@ def MAPFit(
         Samples and extras dictionaries
     """
 
+    # Select model
+    model_fn = multiSpecModel if model_version == 'v1' else multiSpecModelV2
+
     # MAP Estimator
     svi = infer.SVI(
-        multiSpecModel,
-        infer.autoguide.AutoDelta(multiSpecModel),
+        model_fn,
+        infer.autoguide.AutoDelta(model_fn),
         optim.Adam(step_size=1e-2),
         loss=infer.Trace_ELBO(),
     )
@@ -278,7 +314,7 @@ def MAPFit(
     params = {k.removesuffix('_auto_loc'): v for k, v in params.items()}
 
     # Get trace
-    traced_model = trace(substitute(multiSpecModel, data=params)).get_trace(*model_args)
+    traced_model = trace(substitute(model_fn, data=params)).get_trace(*model_args)
 
     # Create compatible samples dictionary
     samples = {
@@ -291,16 +327,19 @@ def MAPFit(
     return samples, {'losses': losses}
 
 
-def computeProbs(samples: dict, model_args: tuple) -> np.ndarray:
+def computeProbs(samples: dict, model_args: tuple, model_version: str = 'v2') -> np.ndarray:
+    # Select model
+    model_fn = multiSpecModel if model_version == 'v1' else multiSpecModelV2
+
     # Compute the log likelihood
-    logLs = infer.util.log_likelihood(multiSpecModel, samples, *model_args)
+    logLs = infer.util.log_likelihood(model_fn, samples, *model_args)
     for k, v in logLs.items():
         samples[k] = v
     logL = np.hstack([p for p in logLs.values()])  # Likelihood Matrix
     samples['logL'] = logL.sum(1)
 
     # Compute the log density
-    logP = vmap(lambda s: infer.util.log_density(multiSpecModel, model_args, {}, s)[0])(
+    logP = vmap(lambda s: infer.util.log_density(model_fn, model_args, {}, s)[0])(
         samples
     )
     samples['logP'] = np.array(logP)
@@ -408,7 +447,7 @@ def saveResults(config, rows, model_args, samples, extras, output_dir) -> None:
 
 
 def get_components_fit(
-    config: dict, model_args: tuple, samples: dict, method: str = 'median'
+    config: dict, model_args: tuple, samples: dict, method: str = 'median', model_version: str = 'v2'
 ) -> Tuple[Dict[str, Dict[str, jnp.ndarray]], dict]:
     """
     Reconstruct the individual lines and continuum for all components.
@@ -423,6 +462,8 @@ def get_components_fit(
         Samples from the MCMC
     method : str, optional
         Method to select parameters ('median' or 'max_prob'), by default 'median'
+    model_version : str
+        Model version to use ('v1' or 'v2'), default 'v2'
 
     Returns
     -------
@@ -433,6 +474,9 @@ def get_components_fit(
     config : dict
         The restricted configuration dictionary with 'Index' keys added, matching the model.
     """
+    # Select model
+    model_fn = multiSpecModel if model_version == 'v1' else multiSpecModelV2
+
     # Ensure config matches model
     spectra = model_args[0]
     config = utils.restrictConfig(config, spectra)
@@ -469,7 +513,7 @@ def get_components_fit(
     with seed(rng_seed=0):
         with substitute(data=params):
             with trace() as tr:
-                multiSpecModel(*model_args)
+                model_fn(*model_args)
 
     # Extract components
     spectra = model_args[0]

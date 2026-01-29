@@ -100,6 +100,19 @@ pixi run pytest tests/test_validation.py -v
 - SNR for each line
 - Pass/fail status per parameter
 
-## New Features
-- keep a TODO of new features in unite/TODO.md, add new features, planned changes to the TODO list as needed, and rank features by priority and type
-- always keep track of new features implemented, by ticking them off in the TODO (e.g. keep a 'implemented' and 'todo' section
+## New Features & TODO.md Format
+
+**TODO.md structure:**
+- Simplified plan + implementation status tables
+- Status icons in **second column** after step number:
+  - ✅ Complete and working
+  - 🛑 Implemented but broken
+  - ⚪ Not yet implemented
+- **No commit column** - keep tables clean and readable
+- Each phase has a GATE CHECK describing completion criteria
+
+**Updating TODO.md:**
+- Add new features and planned changes as needed
+- Mark status with appropriate icon (✅/🛑/⚪)
+- Keep 'Implemented' section at top for completed major features
+- Rank future work by priority (High/Medium/Low)

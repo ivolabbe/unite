@@ -197,4 +197,80 @@ class TestInjectSyntheticLines:
             assert peak_flux > continuum, f'No line peak visible: max={peak_flux}, continuum={continuum}'
 
 
+class TestModelVersions:
+    """Tests for model version equivalence."""
+
+    def test_v2_matches_v1(self, spec_table, output_dir):
+        """Test that multiSpecModelV2 produces identical output to multiSpecModel."""
+        from unite.validation import ValidationSuite, SyntheticLine
+        import pandas as pd
+
+        lines = [
+            SyntheticLine(
+                wavelength=6564.61,  # Hα
+                flux=800.0,
+                fwhm_kms=1200.0,
+                name='Ha',
+            ),
+        ]
+
+        # Run with V1
+        suite_v1 = ValidationSuite(
+            rows=spec_table,
+            lines=lines,
+            continuum_level=50.0,
+            rng_seed=42,
+        )
+        suite_v1.inject()
+        suite_v1.generate_config()
+        suite_v1.fit(
+            output_dir=output_dir / 'v1',
+            N=50,
+            num_warmup=25,
+            verbose=False,
+            model_version='v1',
+        )
+
+        # Run with V2
+        suite_v2 = ValidationSuite(
+            rows=spec_table,
+            lines=lines,
+            continuum_level=50.0,
+            rng_seed=42,
+        )
+        suite_v2.inject()
+        suite_v2.generate_config()
+        suite_v2.fit(
+            output_dir=output_dir / 'v2',
+            N=50,
+            num_warmup=25,
+            verbose=False,
+            model_version='v2',
+        )
+
+        # Load CSV summaries
+        csv_v1 = pd.read_csv(
+            output_dir / 'v1' / 'Results' / f'{spec_table[0]["root"]}-{spec_table[0]["srcid"]}_validation_summary.csv',
+            index_col=0,
+        )
+        csv_v2 = pd.read_csv(
+            output_dir / 'v2' / 'Results' / f'{spec_table[0]["root"]}-{spec_table[0]["srcid"]}_validation_summary.csv',
+            index_col=0,
+        )
+
+        # Compare key parameters (median values)
+        # Allow small numerical differences due to MCMC sampling
+        for param in ['Ha_narrow_6564.61_flux', 'Ha_narrow_6564.61_fwhm']:
+            if param in csv_v1.index and param in csv_v2.index:
+                v1_val = csv_v1.loc[param, 'P50']
+                v2_val = csv_v2.loc[param, 'P50']
+                rel_diff = abs(v1_val - v2_val) / abs(v1_val) if v1_val != 0 else 0
+
+                # Should match within 20% (MCMC sampling variance)
+                assert rel_diff < 0.2, (
+                    f'{param}: V1={v1_val:.3e}, V2={v2_val:.3e}, '
+                    f'rel_diff={rel_diff:.2%}'
+                )
+
+
 # Run with: pixi run pytest tests/test_validation.py -v
