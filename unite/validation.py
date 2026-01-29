@@ -57,6 +57,118 @@ class SyntheticLine:
 
 
 @dataclass
+class SyntheticContinuum:
+    """Configuration for synthetic piecewise linear continuum.
+
+    Attributes
+    ----------
+    regions : np.ndarray
+        Continuum regions (Nc, 2) array of [low, high] wavelength bounds in microns.
+    angles : np.ndarray
+        Angles for each continuum segment (Nc,) in radians.
+    offsets : np.ndarray
+        Offset heights for each continuum segment (Nc,) in flux units.
+    """
+
+    regions: np.ndarray
+    angles: np.ndarray
+    offsets: np.ndarray
+
+    @classmethod
+    def from_spectrum_median(
+        cls,
+        spec: NIRSpecSpectrum,
+        angle_range: Tuple[float, float] = (-0.2, 0.2),
+        rng: np.random.Generator | None = None,
+    ) -> 'SyntheticContinuum':
+        """Generate realistic continuum from spectrum median flux.
+
+        WARNING: This creates regions based on full wavelength range, which may not
+        match the continuum regions used during fitting (which are based on line coverage).
+        For validation, use from_lines() instead to ensure regions match.
+
+        Parameters
+        ----------
+        spec : NIRSpecSpectrum
+            Spectrum to base continuum on.
+        angle_range : Tuple[float, float]
+            Range of angles in radians for continuum slope.
+        rng : np.random.Generator, optional
+            Random number generator.
+
+        Returns
+        -------
+        SyntheticContinuum
+            Continuum model based on spectrum's flux distribution.
+        """
+        if rng is None:
+            rng = np.random.default_rng(0)
+
+        # Use spectrum's wavelength range to define continuum regions
+        wave = spec.wave
+        wave_range = wave.max() - wave.min()
+        n_regions = max(1, int(wave_range / 0.5))  # ~0.5 micron per region
+
+        # Create evenly spaced regions
+        edges = np.linspace(wave.min(), wave.max(), n_regions + 1)
+        regions = np.column_stack([edges[:-1], edges[1:]])
+
+        # Generate angles and offsets
+        angles = rng.uniform(angle_range[0], angle_range[1], n_regions)
+
+        # Base offsets on median flux level with some variation
+        median_flux = float(np.nanmedian(spec.flux))
+        offsets = rng.uniform(0.7 * median_flux, 1.3 * median_flux, n_regions)
+
+        return cls(regions=regions, angles=angles, offsets=offsets)
+
+    @classmethod
+    def from_config(
+        cls,
+        config: dict,
+        spectra,
+        angle_range: Tuple[float, float] = (-0.1, 0.1),
+        rng: np.random.Generator | None = None,
+    ) -> 'SyntheticContinuum':
+        """Generate continuum using the same regions that fitting will use.
+
+        This ensures injected and fitted continuum regions match exactly,
+        enabling proper validation of continuum parameters.
+
+        Parameters
+        ----------
+        config : dict
+            UNITE config with line definitions.
+        spectra : NIRSpecSpectra
+            Spectra object.
+        angle_range : Tuple[float, float]
+            Range of angles in radians for continuum slope.
+        rng : np.random.Generator, optional
+            Random number generator.
+
+        Returns
+        -------
+        SyntheticContinuum
+            Continuum model with regions matching what fitting will use.
+        """
+        from unite import initial
+
+        if rng is None:
+            rng = np.random.default_rng(0)
+
+        # Use the SAME regions that fitting will compute
+        cont_regs, cont_guesses = initial.computeContinuumRegions(config, spectra)
+
+        n_regions = len(cont_regs)
+        angles = rng.uniform(angle_range[0], angle_range[1], n_regions)
+
+        # Use guesses with some variation
+        offsets = cont_guesses * rng.uniform(0.8, 1.2, n_regions)
+
+        return cls(regions=np.array(cont_regs), angles=angles, offsets=offsets)
+
+
+@dataclass
 class ValidationResult:
     """Result of a validation test.
 
@@ -109,9 +221,7 @@ class ValidationResult:
         lines = []
         status = '✓ PASSED' if self.passed else '✗ FAILED'
         lines.append(f'\n{"=" * 80}')
-        lines.append(
-            f'  VALIDATION RESULTS: {status}  (tolerance: {self.sigma_tolerance:.0f}σ)'
-        )
+        lines.append(f'  VALIDATION RESULTS: {status}  (tolerance: {self.sigma_tolerance:.0f}σ)')
         lines.append(f'{"=" * 80}')
 
         # Header
@@ -142,8 +252,7 @@ class ValidationResult:
             w_lo = self.uncertainties['fwhm_lo'][i]
             w_hi = self.uncertainties['fwhm_hi'][i]
             lines.append(
-                f'{"":<12} {"fwhm":<8} {w_inj:>12.0f} {w_rec:>12.0f} '
-                f'[{w_lo:>9.0f}, {w_hi:>9.0f}]'
+                f'{"":<12} {"fwhm":<8} {w_inj:>12.0f} {w_rec:>12.0f} ' f'[{w_lo:>9.0f}, {w_hi:>9.0f}]'
             )
 
             # Redshift row
@@ -152,9 +261,57 @@ class ValidationResult:
             z_lo = self.uncertainties['z_lo'][i]
             z_hi = self.uncertainties['z_hi'][i]
             lines.append(
-                f'{"":<12} {"z":<8} {z_inj:>12.5f} {z_rec:>12.5f} '
-                f'[{z_lo:>9.5f}, {z_hi:>9.5f}]'
+                f'{"":<12} {"z":<8} {z_inj:>12.5f} {z_rec:>12.5f} ' f'[{z_lo:>9.5f}, {z_hi:>9.5f}]'
             )
+            lines.append('-' * 80)
+
+        # Add continuum table if available
+        if 'cont_angle' in self.injected:
+            # Ensure arrays are numpy arrays with consistent shapes
+            cont_angle_inj = np.atleast_1d(self.injected['cont_angle'])
+            cont_angle_rec = np.atleast_1d(self.recovered['cont_angle'])
+            cont_angle_sigma = np.atleast_1d(self.uncertainties['cont_angle_sigma'])
+
+            cont_offset_inj = np.atleast_1d(self.injected['cont_offset'])
+            cont_offset_rec = np.atleast_1d(self.recovered['cont_offset'])
+            cont_offset_sigma = np.atleast_1d(self.uncertainties['cont_offset_sigma'])
+
+            n_inj = len(cont_angle_inj)
+            n_rec = len(cont_angle_rec)
+
+            # Check for shape mismatch
+            if n_inj != n_rec:
+                lines.append(
+                    f'\n{"Region":<10} {"Param":<8} {"Injected":>12} {"Recovered":>12} {"Sigma":>10}'
+                )
+                lines.append('-' * 80)
+                lines.append(f'⚠️  WARNING: Continuum region mismatch!')
+                lines.append(f'    Injected: {n_inj} regions, Recovered: {n_rec} regions')
+                lines.append(
+                    f'    This happens when fitted continuum regions differ from injected regions.'
+                )
+                lines.append(f'    Showing first {min(n_inj, n_rec)} region(s) for comparison:')
+                lines.append('-' * 80)
+                n_regions = min(n_inj, n_rec)
+            else:
+                lines.append(
+                    f'\n{"Region":<10} {"Param":<8} {"Injected":>12} {"Recovered":>12} {"Sigma":>10}'
+                )
+                lines.append('-' * 80)
+                n_regions = n_inj
+
+            for i in range(n_regions):
+                # Angle row
+                lines.append(
+                    f'Region {i:<3} {"angle":<8} {cont_angle_inj[i]:>12.4f} {cont_angle_rec[i]:>12.4f} '
+                    f'{cont_angle_sigma[i]:>9.4f}'
+                )
+                # Offset row
+                lines.append(
+                    f'{"":<10} {"offset":<8} {cont_offset_inj[i]:>12.2f} {cont_offset_rec[i]:>12.2f} '
+                    f'{cont_offset_sigma[i]:>9.2f}'
+                )
+
             lines.append('-' * 80)
 
         # Summary metrics with percentile error and sigma offset
@@ -171,6 +328,16 @@ class ValidationResult:
             f'  Redshift: mean error = {self.metrics["z_mean_error"]:.6f},  '
             f'max offset = {self.metrics["z_max_nsigma"]:.1f}σ'
         )
+
+        # Add continuum summary if available
+        if 'cont_angle_max_nsigma' in self.metrics:
+            lines.append(
+                f'  Continuum angle:  ' f'max offset = {self.metrics["cont_angle_max_nsigma"]:.1f}σ'
+            )
+            lines.append(
+                f'  Continuum offset: ' f'max offset = {self.metrics["cont_offset_max_nsigma"]:.1f}σ'
+            )
+
         lines.append(f'{"=" * 80}\n')
 
         return '\n'.join(lines)
@@ -201,19 +368,32 @@ class ValidationSuite:
         self,
         rows: Table,
         lines: List[SyntheticLine],
-        continuum_level: float | None = None,
+        continuum: SyntheticContinuum | float | None = None,
         rng_seed: int = 0,
     ) -> None:
         self.rows = rows
         self.lines = lines
-        self.continuum_level = continuum_level
         self.rng = np.random.default_rng(rng_seed)
 
         # Load spectra from rows
         self.base_spectra = NIRSpecSpectra(rows)
 
+        # Handle continuum - convert float to SyntheticContinuum
+        if continuum is None:
+            # Will generate simple continuum covering lines in inject()
+            self.continuum = None
+        elif isinstance(continuum, (int, float)):
+            # Backward compatibility: flat continuum
+            logger.warning(
+                'Using flat continuum. Consider using SyntheticContinuum for realistic continuum model.'
+            )
+            self.continuum = continuum
+        else:
+            self.continuum = continuum
+
         # Will be populated after injection/fitting
         self.injected_spectra: NIRSpecSpectra | None = None
+        self.injected_continuum: SyntheticContinuum | None = None
         self.config: dict | None = None
         self.samples: dict | None = None
         self.output_dir: Path | None = None
@@ -221,6 +401,9 @@ class ValidationSuite:
 
     def inject(self, spectrum_idx: int = 0, lsf_scale: float = 1.0) -> NIRSpecSpectra:
         """Inject synthetic lines into a spectrum.
+
+        IMPORTANT: Must call generate_config() BEFORE inject() so that continuum
+        regions can be computed from the config.
 
         Parameters
         ----------
@@ -237,13 +420,31 @@ class ValidationSuite:
         spectra = deepcopy(self.base_spectra)
         spec = spectra.spectra[spectrum_idx]
 
+        # Generate continuum if needed
+        continuum = self.continuum
+        if continuum is None:
+            # Generate continuum using fitting's regions
+            if self.config is None:
+                raise ValueError('Must call generate_config() before inject() to compute continuum regions')
+            logger.info('Generating continuum using fitting regions from config')
+            continuum = SyntheticContinuum.from_config(self.config, self.base_spectra, rng=self.rng)
+        elif isinstance(continuum, (int, float)):
+            # Convert flat continuum to SyntheticContinuum
+            wave = spec.wave
+            wave_range = wave.max() - wave.min()
+            n_regions = max(1, int(wave_range / 0.5))
+            edges = np.linspace(wave.min(), wave.max(), n_regions + 1)
+            regions = np.column_stack([edges[:-1], edges[1:]])
+            angles = np.zeros(n_regions)
+            offsets = np.full(n_regions, float(continuum))
+            continuum = SyntheticContinuum(regions=regions, angles=angles, offsets=offsets)
+
+        # Store injected continuum
+        self.injected_continuum = continuum
+
         # Inject lines using the actual LSF from the spectrum
         spectra.spectra[spectrum_idx] = inject_synthetic_lines(
-            spec,
-            self.lines,
-            continuum_level=self.continuum_level,
-            rng=self.rng,
-            lsf_scale=lsf_scale,
+            spec, self.lines, continuum=continuum, rng=self.rng, lsf_scale=lsf_scale
         )
 
         self.injected_spectra = spectra
@@ -374,15 +575,13 @@ class ValidationSuite:
         # Load samples from saved results
         cname = '_' + self.config['Name'] if self.config['Name'] else ''
         results_path = (
-            self.output_dir
-            / 'Results'
-            / f'{self.rows[0]["root"]}-{self.rows[0]["srcid"]}{cname}_full.npz'
+            self.output_dir / 'Results' / f'{self.rows[0]["root"]}-{self.rows[0]["srcid"]}{cname}_full.npz'
         )
         self.samples = dict(np.load(results_path))
 
         return self.samples
 
-    def validate(self, sigma_tolerance: float = 3.0) -> ValidationResult:
+    def validate(self, sigma_tolerance: float = 3.0, validate_continuum: bool = True) -> ValidationResult:
         """Validate recovered parameters against injected values.
 
         Pass/fail is determined by whether the error is within N sigma
@@ -393,6 +592,9 @@ class ValidationSuite:
         sigma_tolerance : float
             Number of sigma within which recovery is considered passing.
             Default: 3.0 (i.e., error must be < 3σ of the uncertainty).
+        validate_continuum : bool
+            If True, include continuum parameters in validation checks.
+            Default: True. Set to False to only validate line parameters.
 
         Returns
         -------
@@ -452,6 +654,7 @@ class ValidationSuite:
         fwhm_nsigma = fwhm_abs_error / np.maximum(fwhm_sigma, 1e-10)
         z_nsigma = z_abs_error / np.maximum(z_sigma, 1e-10)
 
+        # Build base metrics
         metrics = {
             'flux_mean_error': float(np.mean(flux_pct_error)),
             'fwhm_mean_error': float(np.mean(fwhm_pct_error)),
@@ -461,12 +664,50 @@ class ValidationSuite:
             'z_max_nsigma': float(np.max(z_nsigma)),
         }
 
-        # Check if within sigma tolerance
+        # Check if within sigma tolerance (only for line parameters)
         flux_pass = np.all(flux_nsigma < sigma_tolerance)
         fwhm_pass = np.all(fwhm_nsigma < sigma_tolerance)
         z_pass = np.all(z_nsigma < sigma_tolerance)
+        cont_pass = True  # Default to True unless validate_continuum is enabled
 
-        passed = flux_pass and fwhm_pass and z_pass
+        # Extract continuum parameters if available (for reporting, not validation by default)
+        if self.injected_continuum is not None and 'cont_angle' in self.samples:
+            cont_angle_all = self.samples['cont_angle']
+            cont_offset_all = self.samples['cont_offset']
+
+            # Ensure arrays are at least 1D (median/percentile can return scalars for single-element arrays)
+            cont_angle_recovered = np.atleast_1d(np.median(cont_angle_all, axis=0))
+            cont_offset_recovered = np.atleast_1d(np.median(cont_offset_all, axis=0))
+
+            cont_angle_lo = np.atleast_1d(np.percentile(cont_angle_all, 16, axis=0))
+            cont_angle_hi = np.atleast_1d(np.percentile(cont_angle_all, 84, axis=0))
+            cont_offset_lo = np.atleast_1d(np.percentile(cont_offset_all, 16, axis=0))
+            cont_offset_hi = np.atleast_1d(np.percentile(cont_offset_all, 84, axis=0))
+
+            cont_angle_sigma = (cont_angle_hi - cont_angle_lo) / 2
+            cont_offset_sigma = (cont_offset_hi - cont_offset_lo) / 2
+
+            cont_angle_injected = np.atleast_1d(self.injected_continuum.angles)
+            cont_offset_injected = np.atleast_1d(self.injected_continuum.offsets)
+
+            cont_angle_abs_error = np.abs(cont_angle_recovered - cont_angle_injected)
+            cont_offset_abs_error = np.abs(cont_offset_recovered - cont_offset_injected)
+
+            cont_angle_nsigma = cont_angle_abs_error / np.maximum(cont_angle_sigma, 1e-10)
+            cont_offset_nsigma = cont_offset_abs_error / np.maximum(cont_offset_sigma, 1e-10)
+
+            # Only check continuum for pass/fail if validate_continuum=True
+            if validate_continuum:
+                cont_pass = np.all(cont_angle_nsigma < sigma_tolerance) and np.all(
+                    cont_offset_nsigma < sigma_tolerance
+                )
+
+            # Add continuum metrics (always reported for information)
+            metrics['cont_angle_max_nsigma'] = float(np.max(cont_angle_nsigma))
+            metrics['cont_offset_max_nsigma'] = float(np.max(cont_offset_nsigma))
+
+        # Pass/fail based on line parameters only (unless validate_continuum=True)
+        passed = flux_pass and fwhm_pass and z_pass and cont_pass
 
         # Build details string
         details_parts = []
@@ -478,33 +719,53 @@ class ValidationSuite:
                 f'fwhm={fwhm_nsigma[i]:.1f}σ ({"PASS" if fwhm_nsigma[i] < sigma_tolerance else "FAIL"}), '
                 f'z={z_nsigma[i]:.1f}σ ({"PASS" if z_nsigma[i] < sigma_tolerance else "FAIL"})'
             )
+
+        # Build injected/recovered/uncertainties/nsigma dicts
+        injected_dict = {'flux': flux_injected, 'fwhm': fwhm_injected, 'redshift': z_injected}
+        recovered_dict = {'flux': flux_recovered, 'fwhm': fwhm_recovered, 'redshift': z_recovered}
+        uncertainties_dict = {
+            'flux_lo': flux_lo,
+            'flux_hi': flux_hi,
+            'flux_sigma': flux_sigma,
+            'fwhm_lo': fwhm_lo,
+            'fwhm_hi': fwhm_hi,
+            'fwhm_sigma': fwhm_sigma,
+            'z_lo': z_lo,
+            'z_hi': z_hi,
+            'z_sigma': z_sigma,
+        }
+        nsigma_dict = {'flux': flux_nsigma, 'fwhm': fwhm_nsigma, 'redshift': z_nsigma}
+
+        # Add continuum to dicts if available
+        if 'cont_angle_max_nsigma' in metrics:
+            # Continuum was processed, add to details
+            details_parts.append('\nContinuum:')
+            for i in range(len(cont_angle_nsigma)):
+                details_parts.append(
+                    f'  Region {i}: '
+                    f'angle={cont_angle_nsigma[i]:.1f}σ ({"PASS" if cont_angle_nsigma[i] < sigma_tolerance else "FAIL"}), '
+                    f'offset={cont_offset_nsigma[i]:.1f}σ ({"PASS" if cont_offset_nsigma[i] < sigma_tolerance else "FAIL"})'
+                )
+
+            # Add to result dicts
+            injected_dict['cont_angle'] = cont_angle_injected
+            injected_dict['cont_offset'] = cont_offset_injected
+            recovered_dict['cont_angle'] = cont_angle_recovered
+            recovered_dict['cont_offset'] = cont_offset_recovered
+            uncertainties_dict['cont_angle_sigma'] = cont_angle_sigma
+            uncertainties_dict['cont_offset_sigma'] = cont_offset_sigma
+            nsigma_dict['cont_angle'] = cont_angle_nsigma
+            nsigma_dict['cont_offset'] = cont_offset_nsigma
+
         details = '\n'.join(details_parts)
 
         return ValidationResult(
             passed=passed,
             metrics=metrics,
-            injected={
-                'flux': flux_injected,
-                'fwhm': fwhm_injected,
-                'redshift': z_injected,
-            },
-            recovered={
-                'flux': flux_recovered,
-                'fwhm': fwhm_recovered,
-                'redshift': z_recovered,
-            },
-            uncertainties={
-                'flux_lo': flux_lo,
-                'flux_hi': flux_hi,
-                'flux_sigma': flux_sigma,
-                'fwhm_lo': fwhm_lo,
-                'fwhm_hi': fwhm_hi,
-                'fwhm_sigma': fwhm_sigma,
-                'z_lo': z_lo,
-                'z_hi': z_hi,
-                'z_sigma': z_sigma,
-            },
-            nsigma={'flux': flux_nsigma, 'fwhm': fwhm_nsigma, 'redshift': z_nsigma},
+            injected=injected_dict,
+            recovered=recovered_dict,
+            uncertainties=uncertainties_dict,
+            nsigma=nsigma_dict,
             snr=snr,
             line_names=line_names,
             sigma_tolerance=sigma_tolerance,
@@ -541,7 +802,7 @@ class ValidationSuite:
 def inject_synthetic_lines(
     inspec: NIRSpecSpectrum,
     lines: List[SyntheticLine],
-    continuum_level: float | None = None,
+    continuum: SyntheticContinuum | float | None = None,
     rng: np.random.Generator | None = None,
     lsf_scale: float = 1.2,
 ) -> NIRSpecSpectrum:
@@ -556,8 +817,8 @@ def inject_synthetic_lines(
         Input spectrum (will be deep copied).
     lines : List[SyntheticLine]
         Lines to inject.
-    continuum_level : float, optional
-        Continuum level. If None, uses median of existing flux.
+    continuum : SyntheticContinuum or float, optional
+        Continuum model. If float, uses flat continuum. If None, uses median of existing flux.
     rng : numpy.random.Generator, optional
         Random generator for noise. Default: seed=0.
     lsf_scale : float
@@ -574,18 +835,36 @@ def inject_synthetic_lines(
     spec = deepcopy(inspec)
     low, wave, high, _flux, err = spec()
 
-    # Determine continuum level
-    if continuum_level is None:
-        cont_level = float(np.nanmedian(spec.flux))
-    else:
-        cont_level = float(continuum_level)
+    # Evaluate continuum model
+    if continuum is None:
+        continuum = SyntheticContinuum.from_spectrum_median(spec, rng=rng)
+    elif isinstance(continuum, (int, float)):
+        # Flat continuum for backward compatibility
+        wave_range = wave.max() - wave.min()
+        n_regions = max(1, int(wave_range / 0.5))
+        edges = np.linspace(wave.min(), wave.max(), n_regions + 1)
+        regions = np.column_stack([edges[:-1], edges[1:]])
+        angles = np.zeros(n_regions)
+        offsets = np.full(n_regions, float(continuum))
+        continuum = SyntheticContinuum(regions=regions, angles=angles, offsets=offsets)
+
+    # Evaluate continuum at wavelengths using optimized.linearContinua
+    cont_centers = jnp.array(continuum.regions.mean(axis=1))
+    cont_model = optimized.linearContinua(
+        jnp.array(wave),
+        cont_centers,
+        jnp.array(continuum.angles),
+        jnp.array(continuum.offsets),
+        jnp.array(continuum.regions),
+    ).sum(1)
+    cont_flux = np.asarray(cont_model)
 
     # Redshift factor
     opz = 1.0 + spec.redshift_initial
 
     n_lines = len(lines)
     if n_lines == 0:
-        spec.flux = cont_level + rng.normal(0.0, err)
+        spec.flux = cont_flux + rng.normal(0.0, err)
         return spec
 
     # Rest wavelengths in Angstrom -> spectrum wavelength units (micron)
@@ -607,9 +886,7 @@ def inject_synthetic_lines(
         'lorentzian': optimized.LORENTZIAN,
         'exponential': optimized.EXPONENTIAL,
     }
-    type_idx = jnp.array(
-        [profile_map.get(line.profile, optimized.GAUSSIAN) for line in lines]
-    )
+    type_idx = jnp.array([profile_map.get(line.profile, optimized.GAUSSIAN) for line in lines])
 
     # Get LSF at line centers using the spectrum's actual LSF function
     lsf = spec.lsf(centers, lsf_scale)
@@ -650,7 +927,7 @@ def inject_synthetic_lines(
     total_line_flux = np.asarray(line_model.sum(axis=1))
 
     # Build final model: continuum + lines + noise
-    model_flux = cont_level + total_line_flux
+    model_flux = cont_flux + total_line_flux
     noise = rng.normal(0.0, err)
     spec.flux = model_flux + noise
 

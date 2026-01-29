@@ -51,15 +51,15 @@ class TestValidationSuite:
             ),
         ]
 
+        # Continuum is automatically generated using fitting regions
         suite = ValidationSuite(
             rows=spec_table,
             lines=lines,
-            continuum_level=50.0,
             rng_seed=42,
         )
 
+        suite.generate_config()  # Must be called before inject()
         suite.inject()
-        suite.generate_config()
         suite.fit(
             output_dir=output_dir,
             N=100,
@@ -67,16 +67,30 @@ class TestValidationSuite:
             verbose=False,
         )
 
-        result = suite.validate(sigma_tolerance=3.0)
+        # Use validate_continuum=False for this test since N=100 samples gives marginal continuum recovery
+        result = suite.validate(sigma_tolerance=3.0, validate_continuum=False)
 
         # Print results for debugging
         print(result.pretty_print())
 
-        # All parameters should be within 3 sigma
-        assert result.passed, (
-            f"Validation failed: flux={result.metrics['flux_max_nsigma']:.1f}σ, "
-            f"fwhm={result.metrics['fwhm_max_nsigma']:.1f}σ"
-        )
+        # Verify continuum parameters are reported
+        assert 'cont_angle' in result.injected, 'Continuum angles not in injected parameters'
+        assert 'cont_offset' in result.injected, 'Continuum offsets not in injected parameters'
+        assert 'cont_angle' in result.recovered, 'Continuum angles not in recovered parameters'
+        assert 'cont_offset' in result.recovered, 'Continuum offsets not in recovered parameters'
+
+        # Check that continuum is reasonably recovered (within 5σ for this low-sample test)
+        assert result.metrics['cont_offset_max_nsigma'] < 5.0, \
+            f"Continuum offset {result.metrics['cont_offset_max_nsigma']:.1f}σ is too far off"
+
+        # Line parameters should be within 3 sigma
+        msg_parts = [
+            f"flux={result.metrics['flux_max_nsigma']:.1f}σ",
+            f"fwhm={result.metrics['fwhm_max_nsigma']:.1f}σ",
+            f"z={result.metrics['z_max_nsigma']:.1f}σ",
+        ]
+
+        assert result.passed, f"Line validation failed: {', '.join(msg_parts)}"
 
     def test_multiple_lines(self, spec_table, output_dir):
         """Test recovery of multiple lines with different FWHMs."""
@@ -97,15 +111,15 @@ class TestValidationSuite:
             ),
         ]
 
+        # Continuum is automatically generated using fitting regions
         suite = ValidationSuite(
             rows=spec_table,
             lines=lines,
-            continuum_level=30.0,
             rng_seed=123,
         )
 
+        suite.generate_config()  # Must be called before inject()
         suite.inject()
-        suite.generate_config()
         suite.fit(
             output_dir=output_dir,
             N=100,
@@ -113,15 +127,59 @@ class TestValidationSuite:
             verbose=False,
         )
 
-        result = suite.validate(sigma_tolerance=3.0)
+        # Use validate_continuum=False for this test since N=100 samples gives marginal continuum recovery
+        result = suite.validate(sigma_tolerance=3.0, validate_continuum=False)
 
         print(result.pretty_print())
 
-        # All parameters should be within 3 sigma
-        assert result.passed, (
-            f"Validation failed: flux={result.metrics['flux_max_nsigma']:.1f}σ, "
-            f"fwhm={result.metrics['fwhm_max_nsigma']:.1f}σ"
-        )
+        # Line parameters should be within 3 sigma
+        msg_parts = [
+            f"flux={result.metrics['flux_max_nsigma']:.1f}σ",
+            f"fwhm={result.metrics['fwhm_max_nsigma']:.1f}σ",
+            f"z={result.metrics['z_max_nsigma']:.1f}σ",
+        ]
+
+        assert result.passed, f"Line validation failed: {', '.join(msg_parts)}"
+
+    def test_continuum_recovery(self, spec_table, output_dir):
+        """Test that continuum parameters are properly recovered."""
+        from unite.validation import ValidationSuite, SyntheticLine
+
+        # Add a line and let continuum auto-generate from fitting regions
+        lines = [
+            SyntheticLine(wavelength=6564.61, flux=800.0, fwhm_kms=1200.0, name='Ha'),
+        ]
+
+        suite = ValidationSuite(rows=spec_table, lines=lines, rng_seed=99)
+        suite.generate_config()  # Must be called before inject()
+        suite.inject()
+        suite.fit(output_dir=output_dir, N=200, num_warmup=100, verbose=False)
+
+        # Validate with continuum checks enabled
+        result = suite.validate(sigma_tolerance=3.0, validate_continuum=True)
+
+        print(result.pretty_print())
+
+        # Verify continuum parameters are present
+        assert 'cont_angle' in result.injected, 'Continuum angles not in injected parameters'
+        assert 'cont_offset' in result.injected, 'Continuum offsets not in injected parameters'
+        assert 'cont_angle' in result.recovered, 'Continuum angles not in recovered parameters'
+        assert 'cont_offset' in result.recovered, 'Continuum offsets not in recovered parameters'
+
+        # Verify shapes match
+        assert len(result.injected['cont_angle']) == len(result.recovered['cont_angle']), \
+            'Continuum angle array length mismatch'
+        assert len(result.injected['cont_offset']) == len(result.recovered['cont_offset']), \
+            'Continuum offset array length mismatch'
+
+        # All parameters should pass (with enough samples, N=200)
+        msg_parts = [
+            f"flux={result.metrics['flux_max_nsigma']:.1f}σ",
+            f"fwhm={result.metrics['fwhm_max_nsigma']:.1f}σ",
+            f"cont_angle={result.metrics['cont_angle_max_nsigma']:.1f}σ",
+            f"cont_offset={result.metrics['cont_offset_max_nsigma']:.1f}σ",
+        ]
+        assert result.passed, f"Validation failed: {', '.join(msg_parts)}"
 
     def test_config_saved(self, spec_table, output_dir):
         """Test that config JSON is saved for reproducibility."""
@@ -130,9 +188,10 @@ class TestValidationSuite:
 
         lines = [SyntheticLine(wavelength=6564.61, flux=500.0, fwhm_kms=1000.0, name='Ha')]
 
+        # Continuum is automatically generated
         suite = ValidationSuite(rows=spec_table, lines=lines, rng_seed=0)
+        suite.generate_config()  # Must be called before inject()
         suite.inject()
-        suite.generate_config()
         suite.fit(output_dir=output_dir, N=50, num_warmup=25, verbose=False)
 
         config_path = output_dir / 'validation_config.json'
@@ -159,10 +218,12 @@ class TestInjectSyntheticLines:
 
         original_flux = spec.flux.copy()
 
+        rng = np.random.default_rng(0)
         lines = [SyntheticLine(wavelength=6564.61, flux=1000.0, fwhm_kms=1000.0, name='Ha')]
 
+        # Continuum is automatically generated if not provided
         modified_spec = inject_synthetic_lines(
-            spec, lines, continuum_level=50.0, rng=np.random.default_rng(0)
+            spec, lines, continuum=None, rng=rng
         )
 
         # Flux should be different after injection
@@ -170,7 +231,7 @@ class TestInjectSyntheticLines:
 
     def test_injection_adds_line_peak(self, spec_table):
         """Test that injection creates a visible line peak."""
-        from unite.validation import inject_synthetic_lines, SyntheticLine
+        from unite.validation import inject_synthetic_lines, SyntheticLine, SyntheticContinuum
         from unite.spectra import NIRSpecSpectra
         from astropy import units as u
         import numpy as np
@@ -178,11 +239,22 @@ class TestInjectSyntheticLines:
         spectra = NIRSpecSpectra(spec_table)
         spec = spectra.spectra[0]
 
-        continuum = 50.0
+        rng = np.random.default_rng(0)
+        # Use a flat continuum for this test to check peak detection
+        continuum_level = 50.0
+        wave = spec.wave
+        wave_range = wave.max() - wave.min()
+        n_regions = max(1, int(wave_range / 0.5))
+        edges = np.linspace(wave.min(), wave.max(), n_regions + 1)
+        regions = np.column_stack([edges[:-1], edges[1:]])
+        angles = np.zeros(n_regions)
+        offsets = np.full(n_regions, continuum_level)
+        continuum = SyntheticContinuum(regions=regions, angles=angles, offsets=offsets)
+
         lines = [SyntheticLine(wavelength=6564.61, flux=5000.0, fwhm_kms=2000.0, name='Ha')]
 
         modified_spec = inject_synthetic_lines(
-            spec, lines, continuum_level=continuum, rng=np.random.default_rng(0)
+            spec, lines, continuum=continuum, rng=rng
         )
 
         # Find line center in observed frame
@@ -194,7 +266,7 @@ class TestInjectSyntheticLines:
         if mask.any():
             peak_flux = modified_spec.flux[mask].max()
             # Peak should be above continuum
-            assert peak_flux > continuum, f'No line peak visible: max={peak_flux}, continuum={continuum}'
+            assert peak_flux > continuum_level, f'No line peak visible: max={peak_flux}, continuum={continuum_level}'
 
 
 class TestModelVersions:
@@ -214,15 +286,14 @@ class TestModelVersions:
             ),
         ]
 
-        # Run with V1
+        # Run with V1 - continuum is automatically generated
         suite_v1 = ValidationSuite(
             rows=spec_table,
             lines=lines,
-            continuum_level=50.0,
             rng_seed=42,
         )
+        suite_v1.generate_config()  # Must be called before inject()
         suite_v1.inject()
-        suite_v1.generate_config()
         suite_v1.fit(
             output_dir=output_dir / 'v1',
             N=50,
@@ -231,15 +302,14 @@ class TestModelVersions:
             model_version='v1',
         )
 
-        # Run with V2
+        # Run with V2 - continuum is automatically generated
         suite_v2 = ValidationSuite(
             rows=spec_table,
             lines=lines,
-            continuum_level=50.0,
             rng_seed=42,
         )
+        suite_v2.generate_config()  # Must be called before inject()
         suite_v2.inject()
-        suite_v2.generate_config()
         suite_v2.fit(
             output_dir=output_dir / 'v2',
             N=50,

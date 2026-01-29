@@ -90,9 +90,18 @@ pixi run pytest tests/test_validation.py -v
 ```
 
 **Important:** When making interface changes to `validation.py`:
-1. Always update the pytest tests in `tests/test_validation.py`
-2. Update the example notebook `examples/uniteplus_validation.ipynb` accordingly
-3. The notebook is for manual inspection; pytest tests are the source of truth
+1. **Always** update the pytest tests in `tests/test_validation.py`
+2. **Always** update the example notebook `examples/uniteplus_validation.ipynb` to match
+3. **Always** verify the notebook runs without errors after changes
+4. The notebook demonstrates the API for users; pytest tests are the source of truth for correctness
+5. Keep the notebook's ValidationSuite usage consistent with the current API (e.g., SyntheticContinuum, parameter names)
+
+**Notebook verification checklist:**
+- Update imports to match new API
+- Update function calls with correct parameters
+- Run all notebook cells to ensure no errors
+- Verify `result.pretty_print()` displays correctly
+- Check that plots render without issues
 
 **Validation output:** Use `result.pretty_print()` to display a formatted table showing:
 - Injected vs recovered values
