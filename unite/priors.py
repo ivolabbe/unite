@@ -216,3 +216,91 @@ def flux_scale_prior(mean=1.1, sig=0.2, cutoff=3.0) -> dist.Distribution:
     return dist.TruncatedNormal(
         loc=mean, scale=sig, low=mean - cutoff * sig, high=mean + cutoff * sig
     )
+
+
+def temperature_prior(temp_type: str = 'default') -> dist.Distribution:
+    """
+    Return a uniform prior for blackbody temperature
+
+    Parameters
+    ----------
+    temp_type : str, optional
+        Temperature range type ('hot', 'warm', 'default')
+
+    Return
+    ------
+    dist.Distribution
+        Prior distribution for temperature in Kelvin
+    """
+    low, high = defaults.temperature[temp_type]
+    return dist.Uniform(low=low, high=high)
+
+
+def beta_prior() -> dist.Distribution:
+    """
+    Return a uniform prior for emissivity index beta
+
+    Parameters
+    ----------
+    None
+
+    Return
+    ------
+    dist.Distribution
+        Prior distribution for beta (emissivity index)
+    """
+    low, high = defaults.beta['default']
+    return dist.Uniform(low=low, high=high)
+
+
+def amplitude_prior(guess: float) -> dist.Distribution:
+    """
+    Return a lognormal prior for continuum amplitude
+
+    Parameters
+    ----------
+    guess : float
+        Initial guess for amplitude
+
+    Return
+    ------
+    dist.Distribution
+        Prior distribution for amplitude
+    """
+    return dist.LogNormal(loc=jnp.log(jnp.maximum(guess, 0.01)), scale=1.0)
+
+
+def tau_v_prior(tau_type: str = 'default') -> dist.Distribution:
+    """
+    Prior for V-band optical depth τ_V.
+
+    Parameters
+    ----------
+    tau_type : str
+        Prior type: 'low', 'moderate', 'high', or 'default'
+
+    Returns
+    -------
+    dist.Distribution
+        Prior distribution for optical depth
+    """
+    low, high = defaults.tau_v[tau_type]
+    return dist.Uniform(low=low, high=high)
+
+
+def alpha_atten_prior(alpha_type: str = 'default') -> dist.Distribution:
+    """
+    Prior for attenuation power-law slope α.
+
+    Parameters
+    ----------
+    alpha_type : str
+        Prior type: 'mw' (Milky Way), 'lmc', 'smc', or 'default' (full range)
+
+    Returns
+    -------
+    dist.Distribution
+        Prior distribution for attenuation slope
+    """
+    low, high = defaults.alpha_atten[alpha_type]
+    return dist.Uniform(low=low, high=high)

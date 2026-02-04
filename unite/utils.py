@@ -327,3 +327,57 @@ def masklines(
                 mask = np.logical_and(mask, np.invert(linemask))
 
     return mask
+
+
+def deduplicate_config_lines(config: dict) -> dict:
+    """
+    Remove duplicate lines from config (fixes dotfit bug)
+
+    Some versions of dotfit generate duplicate lines in the config,
+    which causes errors when saving results. This function deduplicates
+    lines based on (Wavelength, RelStrength) tuples.
+
+    Parameters
+    ----------
+    config : dict
+        Config dictionary with potential duplicate lines
+
+    Returns
+    -------
+    dict
+        Config with deduplicated lines
+
+    Examples
+    --------
+    >>> from unite.utils import deduplicate_config_lines
+    >>> config_clean = deduplicate_config_lines(config)
+    >>> results = NIRSpecFit(config_clean, ...)
+    """
+    config = copy.deepcopy(config)
+
+    total_before = 0
+    total_after = 0
+
+    for group_name, group in config.get('Groups', {}).items():
+        for species in group.get('Species', []):
+            lines = species.get('Lines', [])
+            total_before += len(lines)
+
+            # Deduplicate based on (Wavelength, RelStrength) tuples
+            seen = set()
+            unique_lines = []
+
+            for line in lines:
+                key = (line['Wavelength'], line.get('RelStrength'))
+                if key not in seen:
+                    seen.add(key)
+                    unique_lines.append(line)
+
+            species['Lines'] = unique_lines
+            total_after += len(unique_lines)
+
+    if total_before > total_after:
+        print(f"Deduplicated config: {total_before} -> {total_after} lines "
+              f"({total_before - total_after} duplicates removed)")
+
+    return config

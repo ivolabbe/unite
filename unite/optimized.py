@@ -8,6 +8,7 @@ from typing import Final
 # JAX packages
 from jax.scipy.special import erf, erfc
 from jax import config, jit, vmap, lax, numpy as jnp
+import jax
 
 # Conversion factor from FWHM to sigma for variance = 1/2
 # σ = fwhm / ( 2 * sqrt( 2 * ln(2) ) )
@@ -96,19 +97,13 @@ def integrateCauchy(
 
 
 # Pseudo-Voigt profile magic numbers from Thompson+ (1987) DOI:10.1107/S0021889887087090
-_VOIGT_FWHM_CS: Final[jnp.ndarray] = jnp.array(
-    [1, 2.69268, 2.42843, 4.47163, 0.07842, 1]
-)
+_VOIGT_FWHM_CS: Final[jnp.ndarray] = jnp.array([1, 2.69268, 2.42843, 4.47163, 0.07842, 1])
 _VOIGT_ETA_CS: Final[jnp.ndarray] = jnp.array([1.33603, -0.47719, 0.11116])
 
 
 @jit
 def integrateVoigt(
-    low: jnp.ndarray,
-    high: jnp.ndarray,
-    center: jnp.ndarray,
-    fwhm_g: jnp.ndarray,
-    fwhm_γ: jnp.ndarray,
+    low: jnp.ndarray, high: jnp.ndarray, center: jnp.ndarray, fwhm_g: jnp.ndarray, fwhm_γ: jnp.ndarray
 ) -> jnp.ndarray:
     """
     Integrate Voigt emission lines over wavelength bins.
@@ -239,11 +234,7 @@ def _integrandGL(t: jnp.ndarray, a: jnp.ndarray) -> jnp.ndarray:
 
 @jit
 def integrateGaussianLaplace(
-    low: jnp.ndarray,
-    high: jnp.ndarray,
-    center: jnp.ndarray,
-    fwhm_g: jnp.ndarray,
-    fwhm_l: jnp.ndarray,
+    low: jnp.ndarray, high: jnp.ndarray, center: jnp.ndarray, fwhm_g: jnp.ndarray, fwhm_l: jnp.ndarray
 ) -> jnp.ndarray:
     """
     Integrate exponentially modified Gaussian (EMG) emission lines over wavelength bins.
@@ -393,6 +384,7 @@ def linearContinua(
     angles: jnp.ndarray,
     offsets: jnp.ndarray,
     continuum_regions: jnp.ndarray,
+    extrapolate: bool = False,
 ) -> jnp.ndarray:
     """
     Compute the linear model
@@ -409,6 +401,9 @@ def linearContinua(
         Offset of the continua
     continuum_regions : jnp.ndarray
         Bounds of the continuum region
+    extrapolate : bool
+        If True, extrapolate linear segments outside fitted regions.
+        If False (default), return 0 outside fitted regions.
 
     Returns
     -------
@@ -420,10 +415,14 @@ def linearContinua(
     λ = λ[:, jnp.newaxis]
     continuum = jnp.tan(angles) * (λ - cont_center) + offsets
 
-    return jnp.where(
-        jnp.logical_and(continuum_regions[:, 0] < λ, λ < continuum_regions[:, 1]),
-        continuum,
-        0.0,
+    # Use lax.cond to handle both extrapolate True/False in a JIT-safe way
+    in_region = jnp.logical_and(continuum_regions[:, 0] < λ, λ < continuum_regions[:, 1])
+    # If extrapolate=True, return continuum everywhere; if False, mask to region
+    return lax.cond(
+        extrapolate,
+        lambda _: continuum,  # Return continuum everywhere
+        lambda _: jnp.where(in_region, continuum, 0.0),  # Mask to regions
+        None,  # Operand (unused but required)
     )
 
 
@@ -450,3 +449,167 @@ def powerLawContinuum(λ: jnp.ndarray, λ0: float, a: float, β: float) -> jnp.n
     """
 
     return a * ((λ / λ0) ** β)
+
+
+# Physical constants (SI units)
+_H: Final[float] = 6.62607015e-34  # Planck constant (J·s)
+_C_SI: Final[float] = 2.99792458e8  # Speed of light (m/s)
+_KB: Final[float] = 1.380649e-23  # Boltzmann constant (J/K)
+
+
+@jit
+def _safe_log_expm1(x: jnp.ndarray) -> jnp.ndarray:
+    """
+    Compute log(exp(x) - 1) with numerically stable gradients.
+
+    For large x (> ~10): log(exp(x) - 1) ≈ log(exp(x)) = x
+    For small x: use log(expm1(x))
+    Uses smooth transition to avoid gradient discontinuities.
+
+    Parameters
+    ----------
+    x : jnp.ndarray
+        Input values
+
+    Returns
+    -------
+    jnp.ndarray
+        log(exp(x) - 1) computed with numerical stability
+    """
+    # For x > 10, log(exp(x) - 1) ≈ x, so use that directly
+    # For x <= 10, compute log(expm1(x))
+    # Use smooth sigmoid transition around x=10
+
+    # Transition parameter (larger = sharper transition)
+    alpha = jax.nn.sigmoid((x - 10.0) / 3.0)
+
+    # For large x: just return x
+    large_x_approx = x
+
+    # For small x: compute log(expm1(x)) safely
+    # Clip x to avoid overflow in expm1 (expm1 overflows around x=90)
+    x_safe = jnp.minimum(x, 50.0)
+    small_x_value = jnp.log(jnp.maximum(jnp.expm1(x_safe), 1e-100))
+
+    # Blend between the two
+    return jnp.where(x > 50.0, x, alpha * large_x_approx + (1 - alpha) * small_x_value)
+
+
+@jit
+def planck_function(
+    wavelength_micron: jnp.ndarray, temperature_k: jnp.ndarray, pivot_micron: float = 0.5
+) -> jnp.ndarray:
+    """
+    Compute normalized Planck function B_λ(T) / B_λ(pivot, T).
+
+    Parameters
+    ----------
+    wavelength_micron : jnp.ndarray
+        REST-FRAME wavelengths in microns
+    temperature_k : jnp.ndarray
+        Temperature in Kelvin
+    pivot_micron : float
+        Pivot wavelength for normalization (microns)
+
+    Returns
+    -------
+    jnp.ndarray
+        Normalized Planck function (= 1.0 at pivot wavelength)
+    """
+    temperature_k = jnp.clip(temperature_k, 20.0, 1e5)
+    wavelength_m = wavelength_micron * 1e-6
+    pivot_m = pivot_micron * 1e-6
+
+    # Pre-compute constants to avoid gradient overflow
+    # Computing (_H * _C_SI) / (wavelength_m * _KB * temperature_k) directly
+    # causes -inf gradients in JAX. Instead, pre-compute the constant part.
+    const_wave = (_H * _C_SI) / (wavelength_m * _KB)
+    const_pivot = (_H * _C_SI) / (pivot_m * _KB)
+
+    x_wave = const_wave / temperature_k
+    x_pivot = const_pivot / temperature_k
+    x_wave = jnp.clip(x_wave, 0.01, 200.0)
+    x_pivot = jnp.clip(x_pivot, 0.01, 200.0)
+
+    log_wavelength_ratio = -5.0 * jnp.log(wavelength_micron / pivot_micron)
+    log_expm1_diff = _safe_log_expm1(x_pivot) - _safe_log_expm1(x_wave)
+
+    return jnp.exp(jnp.clip(log_wavelength_ratio + log_expm1_diff, -100.0, 100.0))
+
+
+@jit
+def modified_blackbody(
+    wavelength_micron: jnp.ndarray, temperature_k: jnp.ndarray, beta: jnp.ndarray, pivot_micron: float = 1.0
+) -> jnp.ndarray:
+    """
+    Compute normalized modified blackbody: (λ/λ0)^(-β) * B_λ(T) / B_λ(pivot, T).
+
+    Parameters
+    ----------
+    wavelength_micron : jnp.ndarray
+        REST-FRAME wavelengths in microns
+    temperature_k : jnp.ndarray
+        Temperature in Kelvin
+    beta : jnp.ndarray
+        Emissivity index (β). β=0 gives pure blackbody
+    pivot_micron : float
+        Pivot wavelength for normalization (microns)
+
+    Returns
+    -------
+    jnp.ndarray
+        Normalized modified blackbody flux
+    """
+    beta = jnp.clip(beta, -10.0, 10.0)
+    planck = planck_function(wavelength_micron, temperature_k, pivot_micron)
+    emissivity = (wavelength_micron / pivot_micron) ** (-beta)
+    return emissivity * planck
+
+
+# V-band reference wavelength for attenuation
+_LAMBDA_V: Final[float] = 0.55  # V-band wavelength in microns
+
+
+@jit
+def attenuated_planck(
+    wavelength_micron: jnp.ndarray,
+    temperature_k: jnp.ndarray,
+    tau_v: jnp.ndarray,
+    alpha: jnp.ndarray,
+    pivot_micron: float = 1.0,
+) -> jnp.ndarray:
+    """
+    Planck blackbody with power-law dust attenuation.
+
+    Parameters
+    ----------
+    wavelength_micron : array
+        REST-FRAME wavelengths in microns.
+    temperature_k : float
+        Blackbody temperature in Kelvin.
+    tau_v : float
+        V-band optical depth (at 0.55 micron).
+    alpha : float
+        Power-law slope for attenuation. Range: -0.4 (Milky Way) to -2.0 (very steep).
+        Typical value: -0.7 (LMC-like), -1.6 (SMC-like).
+    pivot_micron : float
+        Reference wavelength for Planck normalization (default 1.0 micron).
+
+    Returns
+    -------
+    array
+        Attenuated Planck function normalized at pivot wavelength.
+    """
+    # Clip parameters for numerical stability
+    temperature_k = jnp.clip(temperature_k, 20.0, 1e5)
+    tau_v = jnp.clip(tau_v, 0.0, 10.0)
+    alpha = jnp.clip(alpha, -2.0, 0.0)
+
+    # Planck function (normalized at pivot)
+    planck = planck_function(wavelength_micron, temperature_k, pivot_micron)
+
+    # Attenuation: exp(-τ_V × (λ/λ_V)^α), where λ_V = 0.55 micron
+    wave_ratio = wavelength_micron / _LAMBDA_V
+    attenuation = jnp.exp(-tau_v * jnp.power(wave_ratio, alpha))
+
+    return planck * attenuation

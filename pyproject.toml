@@ -12,7 +12,7 @@ dependencies = [
 # added these while developing
 "pyneb>=1.1.28,<2",
 "splinex @ git+https://github.com/cornelius-braun/splinex.git", "chex>=0.1.90,<0.2", 
-"dotfit @ git+https://github.com/ivolabbe/dotfit.git"
+"dotfit @ git+https://github.com/ivolabbe/dotfit.git@main"
 ]
 
 classifiers = [
@@ -70,6 +70,7 @@ ipykernel = ">=7.1.0,<8"
 setuptools = ">=80.9.0,<81"
 ipywidgets = ">=8.1.8,<9"
 pytest = ">=9.0.2,<10"
+corner = ">=2.2.3,<3"
 
 [tool.pixi.pypi-dependencies]
 unite = { path = ".", editable = true }

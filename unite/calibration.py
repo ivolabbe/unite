@@ -84,12 +84,10 @@ def PolyLSFCurve(resolution_file: str, λ_unit: u.Unit) -> Callable:
     coeffs = jnp.array(res_tab['coeff'])  # Assumes polyval order
 
     # Compute Polynomial Resolution Curve
-    # LSF FWHM in wavelength units
-    # lsf_scale is usually understood as resolution = lambda/dlambda
-    # (see eg prior set to 1.2), so divide by scale
+    # LSF FWHM in wavelength units. Curve is Anna's point source curve, so degrade a bit
     @jit
     def lsf(λ, scale):
-        return (λ / jnp.polyval(coeffs, λ * conversion)) / scale
+        return scale / (λ / jnp.polyval(coeffs, λ * conversion))
 
     return lsf
 
@@ -112,9 +110,7 @@ def InterpPixelOffset(dispersion_file: str, λ_unit: u.Unit) -> Callable:
     """
 
     # Load the dispersion curve
-    u.set_enabled_aliases(
-        {'MICRONS': u.micron, 'PIXEL': u.pix, 'RESOLUTION': u.Angstrom / u.micron}
-    )
+    u.set_enabled_aliases({'MICRONS': u.micron, 'PIXEL': u.pix, 'RESOLUTION': u.Angstrom / u.micron})
     disp_tab = Table.read(dispersion_file)
 
     # Convert to JAX arrays in the correct units
@@ -124,8 +120,6 @@ def InterpPixelOffset(dispersion_file: str, λ_unit: u.Unit) -> Callable:
     # Compute Interpolated offset Curve
     @jit
     def pxoff(λ, offset):
-        return offset * jnp.interp(
-            λ, wave, disp, left='extrapolate', right='extrapolate'
-        )
+        return offset * jnp.interp(λ, wave, disp, left='extrapolate', right='extrapolate')
 
     return pxoff

@@ -348,7 +348,7 @@ def plotRegion(
         resid_ax.text(
             0.02,
             0.92,
-            f'$\chi^2$ = {chi2:.1f}{waic_str}',
+            rf'$\chi^2$ = {chi2:.1f}{waic_str}',
             transform=resid_ax.transAxes,
             va='top',
             ha='left',
@@ -387,6 +387,7 @@ def plotResults(
     plot_kwargs: dict | None = None,
     components: dict | None = None,
     spectra: NIRSpecSpectra | None = None,
+    model_version: str = 'v2',
 ) -> Tuple[pyplot.Figure, dict]:
     """
     Plot the results of the sampling.
@@ -445,7 +446,7 @@ def plotResults(
     if components is None:
         from unite.fitting import get_components_fit
 
-        components, config = get_components_fit(config, model_args, samples)
+        components, config = get_components_fit(config, model_args, samples, model_version=model_version)
 
     os.makedirs(f'{output_dir}/Plots/', exist_ok=True)
 
@@ -627,7 +628,7 @@ def plotRegionSingle(
     if components is None:
         from unite.fitting import get_components_fit
 
-        components, config = get_components_fit(config, model_args, samples)
+        components, config = get_components_fit(config, model_args, samples, model_version=model_version)
 
     # Unpack necessary info from model_args
     # spectra, matrices, linetypes_all, line_centers, line_estimates_eq, cont_regs, cont_guesses
@@ -737,6 +738,274 @@ def plotLines(ax, config, model_args) -> None:
 
     # Set the axis limits
     ax.set(xlim=xlim, ylim=ylim)
+
+
+def plotFullSpectrum(
+    config: dict,
+    rows: Table,
+    output_dir: str,
+    samples: dict | None = None,
+    spectra: NIRSpecSpectra | None = None,
+    ax: pyplot.Axes | None = None,
+    wavelength_range: Tuple[float, float] | None = None,
+    show_fitted_regions: bool = True,
+    show_model: bool = True,
+    alpha_unfitted: float = 0.3,
+    spectrum_index: int = 0,
+    model_version: str = 'v2',
+) -> Tuple[pyplot.Figure, pyplot.Axes]:
+    """
+    Plot full spectrum with fitted vs unfitted regions highlighted.
+
+    Parameters
+    ----------
+    config : dict
+        UNITE configuration dictionary
+    rows : Table
+        Spectrum metadata table
+    output_dir : str
+        Directory containing results
+    samples : dict, optional
+        MCMC samples. If None, loads from disk.
+    spectra : NIRSpecSpectra, optional
+        Spectra object. If None, loads from rows.
+    ax : pyplot.Axes, optional
+        Axes to plot on. If None, creates new figure.
+    wavelength_range : tuple, optional
+        (wmin, wmax) in microns. If None, shows full spectrum.
+    show_fitted_regions : bool
+        If True, grays out non-fitted regions (default: True).
+    show_model : bool
+        If True, overplots fitted model (default: True).
+    alpha_unfitted : float
+        Alpha for unfitted regions (default: 0.3).
+    spectrum_index : int
+        Index of spectrum to plot (default: 0).
+    model_version : str
+        Model version ('v1' or 'v2'), default 'v2'.
+
+    Returns
+    -------
+    fig, ax : pyplot.Figure, pyplot.Axes
+        Figure and axes objects.
+    """
+    from unite.fitting import NIRSpecModelArgs
+    from unite.model import multiSpecModel, multiSpecModelV2
+    from numpyro.handlers import substitute, trace, seed
+    import jax.numpy as jnp
+
+    # Load spectra if not provided (this loads the FULL mock spectrum)
+    if spectra is None:
+        spectra = NIRSpecSpectra(rows)
+
+    # Load samples if not provided
+    if samples is None:
+        cname = '_' + config['Name'] if config.get('Name') else ''
+        savename = f'{output_dir}/Results/{rows[0]["root"]}-{rows[0]["srcid"]}{cname}'
+        samples = dict(np.load(f'{savename}_full.npz'))
+
+    # Get the full spectrum data FIRST
+    spec = spectra.spectra[spectrum_index]
+    wave = np.array(spec.wave)
+    flux = np.array(spec.flux)
+    err = np.array(spec.err)
+
+    # Save original continuum regions for highlighting fitted regions later
+    cont_regs_orig = np.array(config.get('ContinuumRegions', [[wave.min(), wave.max()]]))
+
+    # Create a modified config with cont_regs covering FULL spectrum
+    # This ensures NIRSpecModelArgs doesn't filter wavelengths
+    config_full = config.copy()
+    wave_min_rest = wave.min() / (1 + spec.redshift_initial)  # Convert to rest-frame
+    wave_max_rest = wave.max() / (1 + spec.redshift_initial)
+    config_full['ContinuumRegions'] = [[float(wave_min_rest), float(wave_max_rest)]]
+
+    # Get model args with full spectrum (not filtered)
+    _, model_args_full_spec = NIRSpecModelArgs(config_full, rows=rows, spectra=spectra, rescale_errors=False)
+    spectra_arg, matrices, linetypes_all, line_centers, line_estimates_eq, _, continuum_models = model_args_full_spec
+
+    # Apply wavelength range for plotting
+    if wavelength_range is not None:
+        wmin, wmax = wavelength_range
+        mask = (wave >= wmin) & (wave <= wmax)
+        wave_plot = wave[mask]
+        flux_plot = flux[mask]
+        err_plot = err[mask]
+    else:
+        wave_plot = wave
+        flux_plot = flux
+        err_plot = err
+
+    # Reconstruct fitted model at ALL wavelengths using trace()
+    model_wave = None
+    model_flux = None
+    continuum_flux = None
+    lines_flux = None
+
+    if show_model:
+        from unite.model import multiSpecModel, multiSpecModelV2
+        from numpyro.handlers import substitute, trace, seed
+        from unite import parameters, utils
+
+        # Select model function
+        model_fn = multiSpecModel if model_version == 'v1' else multiSpecModelV2
+
+        # Ensure config matches model
+        config_restricted = utils.restrictConfig(config, spectra_arg)
+        parameters.configToMatrices(config_restricted)
+
+        # Determine which cont_regs to use based on continuum model type
+        if model_version == 'v2':
+            from unite.continuum import LinearContinuum
+            # Check if any continuum model is LinearContinuum
+            has_linear = any(isinstance(cm, LinearContinuum) for cm in continuum_models)
+
+            if has_linear:
+                # Use ORIGINAL cont_regs for LinearContinuum (per-region parameters)
+                _, _, _, _, _, cont_regs_orig, _ = model_args_full_spec
+                cont_regs_to_use = cont_regs_orig
+            else:
+                # Use FULL spectrum region for BB/MBB/ABB (show continuum everywhere)
+                wave_min_rest = wave.min() / (1 + spec.redshift_initial)
+                wave_max_rest = wave.max() / (1 + spec.redshift_initial)
+                cont_regs_to_use = jnp.array([[wave_min_rest, wave_max_rest]])
+
+            model_args_full = (
+                spectra_arg, matrices, linetypes_all, line_centers, line_estimates_eq,
+                cont_regs_to_use, continuum_models
+            )
+        else:
+            # V1 uses single cont_guess, so can use full spectrum region
+            wave_min_rest = wave.min() / (1 + spec.redshift_initial)
+            wave_max_rest = wave.max() / (1 + spec.redshift_initial)
+            cont_regs_full = jnp.array([[wave_min_rest, wave_max_rest]])
+            cont_guesses_full = jnp.array([flux.mean()])
+            model_args_full = (
+                spectra_arg, matrices, linetypes_all, line_centers, line_estimates_eq,
+                cont_regs_full, cont_guesses_full
+            )
+
+        # Get median parameters
+        # For arrays with first dim matching number of samples, take median
+        # This handles both (N_samples,) and (N_samples, N_params) shapes
+        n_samples = None
+        for v in samples.values():
+            if isinstance(v, (jnp.ndarray, np.ndarray)) and v.ndim > 0:
+                n_samples = v.shape[0]
+                break
+
+        params = {}
+        for k, v in samples.items():
+            if not isinstance(v, (jnp.ndarray, np.ndarray)):
+                params[k] = v
+            elif v.ndim == 0:
+                params[k] = v
+            elif n_samples is not None and v.shape[0] == n_samples:
+                # This is a sampled parameter - take median
+                params[k] = jnp.median(v, axis=0)
+            else:
+                # Deterministic or different shape - keep as-is
+                params[k] = v
+
+        # Filter out deterministic sites to force re-computation
+        excluded_suffixes = ('_model', '_lines', '_cont', '_lsf', '_z_all', '_wave')
+        excluded_keys = {'flux_all', 'redshift_all', 'fwhm_all', 'ew_all', 'cont_center', 'logP'}
+        params = {
+            k: v for k, v in params.items()
+            if k not in excluded_keys and not k.endswith(excluded_suffixes)
+        }
+
+        # Run model with trace to get components
+        with seed(rng_seed=0):
+            with substitute(data=params):
+                with trace() as tr:
+                    model_fn(*model_args_full)
+
+        # Extract components for the spectrum
+        spec_name = spec.name
+        if f'{spec_name}_model' in tr:
+            model_wave = np.asarray(tr[f'{spec_name}_wave']['value'])
+            model_flux = np.asarray(tr[f'{spec_name}_model']['value'])
+            continuum_flux = np.asarray(tr[f'{spec_name}_cont']['value'])
+            lines_flux = np.asarray(tr[f'{spec_name}_lines']['value'])
+
+            # Apply flux scale if present
+            flux_key = f'{spec_name}_flux'
+            flux_scale = 1.0
+            if flux_key in tr:
+                flux_scale = tr[flux_key]['value']
+                continuum_flux = continuum_flux * flux_scale
+                lines_flux = lines_flux * flux_scale
+
+
+    # Create figure if needed
+    if ax is None:
+        fig, ax = pyplot.subplots(figsize=(12, 5))
+    else:
+        fig = ax.figure
+
+    # Check if we have linear continuum (skip fitted/unfitted highlighting for linear)
+    has_linear_continuum = False
+    if model_version == 'v2' and continuum_models:
+        from unite.continuum import LinearContinuum
+        has_linear_continuum = any(isinstance(cm, LinearContinuum) for cm in continuum_models)
+
+    # Determine fitted regions for highlighting (skip for linear continuum)
+    fitted_mask = np.zeros_like(wave_plot, dtype=bool)
+    if show_fitted_regions and not has_linear_continuum:
+        # Mark original continuum regions as fitted
+        for region in cont_regs_orig:
+            region_mask = (wave_plot >= region[0]) & (wave_plot <= region[1])
+            fitted_mask |= region_mask
+
+        # Mark line regions (±5000 km/s around each line)
+        c_kms = 3e5
+        opz = 1 + spectra.redshift_initial
+        for line_center_rest in line_centers:
+            line_center_obs = line_center_rest * 1e-4 * opz  # Angstrom to micron
+            line_width = line_center_obs * 5000 / c_kms
+            line_mask = np.abs(wave_plot - line_center_obs) < line_width
+            fitted_mask |= line_mask
+
+    # Plot full spectrum with fitted regions highlighted (unless linear continuum)
+    if show_fitted_regions and np.any(fitted_mask) and not has_linear_continuum:
+        # Plot fitted regions in full color
+        ax.plot(wave_plot[fitted_mask], flux_plot[fitted_mask], 'k-',
+               lw=0.8, label='Data (fitted)', alpha=1.0)
+        # Plot unfitted regions grayed out
+        if np.any(~fitted_mask):
+            ax.plot(wave_plot[~fitted_mask], flux_plot[~fitted_mask], 'k-',
+                   lw=0.8, alpha=alpha_unfitted, label='Data (unfitted)')
+        # Error bars
+        ax.fill_between(wave_plot, flux_plot - err_plot, flux_plot + err_plot,
+                       color='gray', alpha=0.2)
+    else:
+        # Plot entire spectrum without highlighting (used for BB and linear continuum)
+        ax.plot(wave_plot, flux_plot, 'k-', lw=0.8, label='Data', alpha=0.8)
+        ax.fill_between(wave_plot, flux_plot - err_plot, flux_plot + err_plot,
+                       color='gray', alpha=0.2)
+
+    # Plot fitted model (reconstructed at all wavelengths)
+    if show_model and model_flux is not None:
+        # Apply wavelength range to model
+        if wavelength_range is not None:
+            wmin, wmax = wavelength_range
+            mask = (model_wave >= wmin) & (model_wave <= wmax)
+            model_wave = model_wave[mask]
+            model_flux = model_flux[mask]
+
+        ax.plot(model_wave, model_flux, 'r-', lw=1.5, alpha=0.7, label='Fitted model')
+
+    # Labels and formatting
+    ax.set_xlabel('Observed Wavelength (μm)', fontsize=12)
+    ax.set_ylabel(r'$f_\lambda$ ($10^{-20}$ erg s$^{-1}$ cm$^{-2}$ Å$^{-1}$)', fontsize=12)
+    ax.set_title(f'Full Spectrum: {spec.name}', fontsize=13)
+    ax.legend(loc='best', fontsize=10)
+    ax.grid(True, alpha=0.3, ls=':', which='both')
+    ax.axhline(0, color='gray', linestyle=':', alpha=0.5, lw=1)
+
+    pyplot.tight_layout()
+    return fig, ax
 
 
 # Log barrier constraints

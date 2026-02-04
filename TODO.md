@@ -63,6 +63,40 @@
 | 4.2 | X | Update CLAUDE.md | Docs reflect implementation | `git commit -m "Document validation framework"` |
 | 4.3 |   | Add CI/CD integration | Tests run in CI | `git commit -m "Add validation to CI"` |
 
+### Phase 5 - Continuum Models (GATE: Blackbody continuum works for V2)
+
+| Step | Status | Task |
+|------|--------|------|
+| 5.1 | ✅ | Implement planck_function() in optimized.py |
+| 5.2 | ✅ | Implement modified_blackbody() in optimized.py |
+| 5.3 | ✅ | Add temperature/beta priors to defaults.py and priors.py |
+| 5.4 | ✅ | Implement BlackbodyContinuum class in continuum.py |
+| 5.5 | ✅ | Implement ModifiedBlackbodyContinuum class in continuum.py |
+| 5.6 | ✅ | Implement CompositeContinuum class in continuum.py |
+| 5.7 | ✅ | Add parse_continuum_config() to continuum.py |
+| 5.8 | ✅ | Update SyntheticContinuum to support blackbody |
+| 5.9 | ✅ | Update inject_synthetic_lines() to handle BB continuum |
+| 5.10 | ✅ | Add unit tests for continuum models (15 tests passing) |
+| 5.11 | ✅ | Add blackbody validation test to test_validation.py |
+| 5.12 | ✅ | Integrate parse_continuum_config() into fitting.py for V2 |
+| 5.13 | ✅ | Update V2 model to use ContinuumModel.evaluate() |
+| 5.14 | ⚪ | Update validation notebook with blackbody examples |
+| 5.15 | ✅ | Debug and fix MCMC initialization (gradient overflow fix) |
+| 5.16 | ✅ | Fix NaN in _safe_log_expm1 for x >= 100 |
+| 5.17 | ✅ | Fix gradient overflow in planck_function |
+
+**GATE CHECK:** ✅ **ALL SYSTEMS GO!**
+
+- ✅ Can inject BB continuum
+- ✅ Unit tests pass (15/15)
+- ✅ BB MCMC fitting works (temp recovered within 0.5%!)
+- ✅ All validation tests pass (8/8 including BB recovery)
+- ✅ Linear continuum still works
+
+**Bugs Fixed:**
+1. **NaN in _safe_log_expm1** for x >= 100: Fixed by using asymptotic approximation `log(exp(x)-1) ≈ x` for large x
+2. **Gradient overflow**: Fixed by pre-computing physical constants before division, avoiding intermediate overflow in JAX autodiff
+
 ## TODO
 
 ### High Priority

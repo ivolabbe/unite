@@ -72,20 +72,12 @@ def multiSpecModel(
 
     # Map linetypes to optimized profile indices, Default to Gaussian (0)
     type_idx = jnp.zeros_like(linetypes, dtype=jnp.int32)
-    type_idx = jnp.where(
-        linetypes == defaults.LINETYPES['lorentzian'], optimized.LORENTZIAN, type_idx
-    )
-    type_idx = jnp.where(
-        linetypes == defaults.LINETYPES['exponential'], optimized.EXPONENTIAL, type_idx
-    )
+    type_idx = jnp.where(linetypes == defaults.LINETYPES['lorentzian'], optimized.LORENTZIAN, type_idx)
+    type_idx = jnp.where(linetypes == defaults.LINETYPES['exponential'], optimized.EXPONENTIAL, type_idx)
 
     # Build the original parameters
     params = {}
-    all_ps = (
-        ('flux', priors.flux_prior),
-        ('redshift', priors.redshift_prior),
-        ('fwhm', priors.fwhm_prior),
-    )
+    all_ps = (('flux', priors.flux_prior), ('redshift', priors.redshift_prior), ('fwhm', priors.fwhm_prior))
     for i, (M_orig, lt_orig, M_add, lt_add, M_orig_add, p) in enumerate(
         zip(orig, lts_orig, add, lts_add, orig_add, all_ps)
     ):
@@ -135,9 +127,7 @@ def multiSpecModel(
         offsets = sample('cont_offset', priors.height_prior(cont_guesses))
 
     # Compute equivalent widths
-    linecont = optimized.linearContinua(
-        centers, cont_centers, angles, offsets, cont_regs
-    ).sum(1)
+    linecont = optimized.linearContinua(centers, cont_centers, angles, offsets, cont_regs).sum(1)
     determ('ew_all', fluxes / (linecont * oneplusz))
 
     # Loop over spectra
@@ -178,15 +168,11 @@ def multiSpecModel(
         # Compute continuum
         continuum = determ(
             f'{spectrum.name}_cont',
-            optimized.linearContinua(
-                wave, cont_centers, angles, offsets, cont_regs_shift
-            ).sum(1),
+            optimized.linearContinua(wave, cont_centers, angles, offsets, cont_regs_shift).sum(1),
         )
 
         # Compute model
-        model = determ(
-            f'{spectrum.name}_model', flux_scale * (lines.sum(1) + continuum)
-        )
+        model = determ(f'{spectrum.name}_model', flux_scale * (lines.sum(1) + continuum))
 
         # Compute likelihood
         sample(f'{spectrum.name}', dist.Normal(model, err), obs=flux)
@@ -197,6 +183,75 @@ def multiSpecModel(
 #       return wave, fλ, params, (fluxes, linecont, centers, fwhms)
 
 
+# Define the continuum-only model (no emission lines)
+def multiSpecModelContinuumOnly(
+    spectra: Spectra,
+    cont_regs: jnp.ndarray,
+    continuum_models: List[ContinuumModel],
+    return_components: bool = False,
+) -> None:
+    """
+    Continuum-only model (no emission lines).
+
+    Fits only continuum to regions outside masked lines.
+
+    Parameters
+    ----------
+    spectra : Spectra
+        Spectra to fit
+    cont_regs : jnp.ndarray
+        Continuum regions in OBSERVED-FRAME (microns)
+    continuum_models : List[ContinuumModel]
+        List of continuum model instances
+
+    Returns
+    -------
+    None
+    """
+    # Build Spectrum Calibration
+    calib = NIRSpecCalibration(spectra.names, spectra.fixed)
+
+    # All continuum models evaluate in rest-frame wavelengths
+    cont_regs_rest = cont_regs / (1 + spectra.redshift_initial)
+
+    # Sample continuum parameters for each model
+    cont_params_all = []
+    for continuum_model in continuum_models:
+        params = continuum_model.sample_params(sample, cont_regs_rest)
+        cont_params_all.append(params)
+
+    # Loop over spectra
+    if return_components:
+        components = {}
+
+    for spectrum in spectra.spectra:
+        # Get the spectrum
+        low, wave, high, flux, err = (jnp.array(x) for x in spectrum())
+
+        # Get the calibration
+        lsf_scale, pixel_offset, flux_scale = calib[spectrum.name]
+
+        # Apply pixel offset
+        low = low - spectrum.offset(low, pixel_offset)
+        wave = wave - spectrum.offset(wave, pixel_offset)
+        high = high - spectrum.offset(high, pixel_offset)
+
+        wave = determ(f'{spectrum.name}_wave', wave)
+
+        # Compute continuum using all continuum models (in REST-FRAME)
+        wave_rest = wave / (1 + spectra.redshift_initial)
+        continuum = jnp.zeros_like(wave)
+        for continuum_model, cont_params in zip(continuum_models, cont_params_all):
+            continuum = continuum + continuum_model.evaluate(wave_rest, cont_params, cont_regs_rest)
+        continuum = determ(f'{spectrum.name}_cont', continuum)
+
+        # Compute model (continuum only, no lines)
+        model = determ(f'{spectrum.name}_model', flux_scale * continuum)
+
+        # Compute likelihood
+        sample(f'{spectrum.name}', dist.Normal(model, err), obs=flux)
+
+
 # Define the V2 model with continuum interface
 def multiSpecModelV2(
     spectra: Spectra,
@@ -205,11 +260,14 @@ def multiSpecModelV2(
     line_centers: jnp.ndarray,
     line_estimates_eq: jnp.ndarray,
     cont_regs: jnp.ndarray,
-    continuum_model: ContinuumModel,
+    continuum_models: List[ContinuumModel],
     return_components: bool = False,
+    continuum_only: bool = False,
 ) -> None:
     """
     Multi-Spectrum Model V2 with continuum interface.
+
+    All continuum models evaluate in REST-FRAME wavelengths.
 
     Parameters
     ----------
@@ -220,18 +278,24 @@ def multiSpecModelV2(
     linetypes_all : Tuple[jnp.ndarray, List[jnp.ndarray], List[jnp.ndarray]]
         Line Type Arrays
     line_centers : jnp.ndarray
-        Line centers
+        Line centers in REST-FRAME (Angstrom)
     line_estimates_eq : jnp.ndarray
         Equalized line estimates
     cont_regs : jnp.ndarray
-        Continuum regions
-    continuum_model : ContinuumModel
-        Continuum model instance (e.g., LinearContinuum)
+        Continuum regions in OBSERVED-FRAME (microns)
+    continuum_models : List[ContinuumModel]
+        List of continuum model instances (e.g., [LinearContinuum()])
+    continuum_only : bool
+        If True, fit only continuum (no emission lines)
 
     Returns
     -------
     None
     """
+
+    # Delegate to continuum-only model if requested
+    if continuum_only:
+        return multiSpecModelContinuumOnly(spectra, cont_regs, continuum_models, return_components)
 
     # Build Spectrum Calibration
     calib = NIRSpecCalibration(spectra.names, spectra.fixed)
@@ -244,20 +308,12 @@ def multiSpecModelV2(
 
     # Map linetypes to optimized profile indices, Default to Gaussian (0)
     type_idx = jnp.zeros_like(linetypes, dtype=jnp.int32)
-    type_idx = jnp.where(
-        linetypes == defaults.LINETYPES['lorentzian'], optimized.LORENTZIAN, type_idx
-    )
-    type_idx = jnp.where(
-        linetypes == defaults.LINETYPES['exponential'], optimized.EXPONENTIAL, type_idx
-    )
+    type_idx = jnp.where(linetypes == defaults.LINETYPES['lorentzian'], optimized.LORENTZIAN, type_idx)
+    type_idx = jnp.where(linetypes == defaults.LINETYPES['exponential'], optimized.EXPONENTIAL, type_idx)
 
     # Build the original parameters
     params = {}
-    all_ps = (
-        ('flux', priors.flux_prior),
-        ('redshift', priors.redshift_prior),
-        ('fwhm', priors.fwhm_prior),
-    )
+    all_ps = (('flux', priors.flux_prior), ('redshift', priors.redshift_prior), ('fwhm', priors.fwhm_prior))
     for i, (M_orig, lt_orig, M_add, lt_add, M_orig_add, p) in enumerate(
         zip(orig, lts_orig, add, lts_add, orig_add, all_ps)
     ):
@@ -296,20 +352,20 @@ def multiSpecModelV2(
     # Transform fwhms into wavelength units
     fwhms = centers * determ('fwhm_all', params['fwhm']) / C
 
-    # Sample continuum parameters via the continuum model
-    Nc = len(cont_regs)  # Number of continuum regions
-    with plate(f'Nc = {Nc}', Nc):
-        # Get priors from continuum model
-        cont_priors = continuum_model.get_priors()
-        cont_params = {}
-        for param_name, prior in cont_priors.items():
-            cont_params[param_name] = sample(param_name, prior)
+    # All continuum models evaluate in rest-frame wavelengths
+    cont_regs_rest = cont_regs / (1 + spectra.redshift_initial)
+    #  cont_centers_rest = determ('cont_center', cont_regs_rest.mean(axis=1))
 
-    # Compute continuum centers for EW calculation
-    cont_centers = determ('cont_center', cont_regs.mean(axis=1))
+    # Sample continuum parameters for each model
+    cont_params_all = []
+    for continuum_model in continuum_models:
+        params = continuum_model.sample_params(sample, cont_regs_rest)
+        cont_params_all.append(params)
 
-    # Compute equivalent widths (use continuum model evaluation)
-    linecont = continuum_model.evaluate(centers, cont_params, cont_regs)
+    # Compute equivalent widths (evaluate at line centers in REST-FRAME)
+    linecont = jnp.zeros_like(line_centers)
+    for continuum_model, cont_params in zip(continuum_models, cont_params_all):
+        linecont = linecont + continuum_model.evaluate(line_centers, cont_params, cont_regs_rest)
     determ('ew_all', fluxes / (linecont * oneplusz))
 
     # Loop over spectra
@@ -327,7 +383,6 @@ def multiSpecModelV2(
         low = low - spectrum.offset(low, pixel_offset)
         wave = wave - spectrum.offset(wave, pixel_offset)
         high = high - spectrum.offset(high, pixel_offset)
-        cont_regs_shift = cont_regs - spectrum.offset(cont_regs, pixel_offset)
 
         wave = determ(f'{spectrum.name}_wave', wave)
 
@@ -347,16 +402,15 @@ def multiSpecModelV2(
         # Multiply by line fluxes
         lines = determ(f'{spectrum.name}_lines', fluxes * fλ)
 
-        # Compute continuum using continuum model
-        continuum = determ(
-            f'{spectrum.name}_cont',
-            continuum_model.evaluate(wave, cont_params, cont_regs_shift),
-        )
+        # Compute continuum using all continuum models (in REST-FRAME)
+        wave_rest = wave / (1 + spectra.redshift_initial)
+        continuum = jnp.zeros_like(wave)
+        for continuum_model, cont_params in zip(continuum_models, cont_params_all):
+            continuum = continuum + continuum_model.evaluate(wave_rest, cont_params, cont_regs_rest)
+        continuum = determ(f'{spectrum.name}_cont', continuum)
 
         # Compute model
-        model = determ(
-            f'{spectrum.name}_model', flux_scale * (lines.sum(1) + continuum)
-        )
+        model = determ(f'{spectrum.name}_model', flux_scale * (lines.sum(1) + continuum))
 
         # Compute likelihood
         sample(f'{spectrum.name}', dist.Normal(model, err), obs=flux)
