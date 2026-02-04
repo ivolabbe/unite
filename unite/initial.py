@@ -133,8 +133,11 @@ def lineFluxGuess(spectrum: Spectrum, center: float, line_cont: float, inner: u.
         imask = True
 
     # Estimate flux as maximum deviation from zero times the width of the region
-    # NOTE: Original formula, kept for backward compatibility with existing behavior
     flux = (jnp.abs(spectrum.flux[imask]).max() * (spectrum.high[imask] - spectrum.low[imask])).sum()
+
+    # Unit conversion: flux is in [fλ × μm], model expects [fλ × Å]
+    # 1 μm = 10^4 Å, so multiply by 10^4
+    flux *= 1e4
 
     # If mask is empty, negate the sign
     if empty:
