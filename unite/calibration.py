@@ -85,9 +85,10 @@ def PolyLSFCurve(resolution_file: str, λ_unit: u.Unit) -> Callable:
 
     # Compute Polynomial Resolution Curve
     # LSF FWHM in wavelength units. Curve is Anna's point source curve, so degrade a bit
+    # FWHM = λ / R, where R is resolving power
     @jit
     def lsf(λ, scale):
-        return scale / (λ / jnp.polyval(coeffs, λ * conversion))
+        return scale * λ / jnp.polyval(coeffs, λ * conversion)
 
     return lsf
 

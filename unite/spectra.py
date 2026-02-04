@@ -600,14 +600,17 @@ class NIRSpecSpectrum(Spectrum):
         # Keep track if fixed
         self.fixed = fixed
 
+        # Extract grating name (strip filter part if present, e.g., G235M_F170LP -> G235M)
+        grating = disperser.split('_')[0]
+
         # Compute resolution
         lsf_dir = resources.files('unite.data.resolution')
-        lsf_file = f'jwst_nirspec_{disperser.lower()}_resolution.fits'
+        lsf_file = f'jwst_nirspec_{grating.lower()}_resolution.fits'
         self.lsf = calibration.PolyLSFCurve(lsf_dir.joinpath(lsf_file), λ_unit)
 
         # Compute pixel offset
         disp_dir = resources.files('unite.data.disp')
-        disp_file = f'jwst_nirspec_{disperser.lower()}_disp.fits'
+        disp_file = f'jwst_nirspec_{grating.lower()}_disp.fits'
         self.offset = calibration.InterpPixelOffset(disp_dir.joinpath(disp_file), λ_unit)
 
         # Load the spectrum from file

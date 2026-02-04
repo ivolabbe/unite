@@ -187,11 +187,14 @@ def integrateLaplace(
     t_high = (high - center) * λ
 
     # Laplace CDF: F(t) = 1/2 + 1/2 * sign(t) * (1 - exp(-|t|))
+    # Rewritten without sign() for differentiability:
+    #   For t >= 0: F(t) = 1 - 1/2 * exp(-t)
+    #   For t < 0:  F(t) = 1/2 * exp(t)
     @jit
     def laplace_cdf(t):
-        return jnp.sign(t) * (1 - jnp.exp(-jnp.abs(t)))
+        return jnp.where(t >= 0, 1 - 0.5 * jnp.exp(-t), 0.5 * jnp.exp(t))
 
-    return (laplace_cdf(t_high) - laplace_cdf(t_low)) / 2
+    return laplace_cdf(t_high) - laplace_cdf(t_low)
 
 
 # Threshold for when exp(x*x) overflows
@@ -229,7 +232,10 @@ def _integrandGL(t: jnp.ndarray, a: jnp.ndarray) -> jnp.ndarray:
     # Overflow protection
     posterm = jnp.where(ta > _OVERFLOW_THRESHOLD, 0, jnp.exp(twota) * erfc(ta))
 
-    return jnp.sign(t) * jnp.exp(a * a) * (posterm - jnp.exp(-twota) * erfc(-t_abs + a))
+    # Compute for positive t, then use odd symmetry for negative t
+    # Replace sign(t) with jnp.where for differentiability
+    result_abs = jnp.exp(a * a) * (posterm - jnp.exp(-twota) * erfc(-t_abs + a))
+    return jnp.where(t >= 0, result_abs, -result_abs)
 
 
 @jit
