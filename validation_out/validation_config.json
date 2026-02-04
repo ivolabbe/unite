@@ -1,0 +1,12 @@
+{
+  "Name": "continuum_only_bb_test",
+  "Unit": "AA",
+  "Groups": {},
+  "continuum_only": true,
+  "mask_lines": "default",
+  "continuum": {
+    "type": "blackbody",
+    "pivot_micron": 1.0,
+    "temp_type": "default"
+  }
+}

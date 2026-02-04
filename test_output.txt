@@ -1,0 +1,118 @@
+======================================================================
+TESTING CONTINUUM_ONLY_TUTORIAL.IPYNB
+======================================================================
+
+[Cell 2] Executing...
+Preview: import os
+os.environ['JAX_ENABLE_X64'] = '1'
+
+import numpy as np
+import matplotl...
+[Cell 2] ✅ SUCCESS
+
+[Cell 4] Executing...
+Preview: # Spectrum path (update to your file)
+spectrum_path = '../spectra/mom-uds01-v4_p...
+Spectrum: mom-uds01-v4_prism-clear_5224_150135.spec.fits
+Redshift: 7.7644
+Wavelength range (obs): 0.55 - 5.50 micron
+                (rest): 0.06 - 0.63 Å
+[Cell 4] ✅ SUCCESS
+
+[Cell 6] Executing...
+Preview: # Config for basic continuum fit
+from dotfit.emission_lines import EmissionLines...
+name continuum_basic
+Continuum regions (basic fit):
+  Region 1: 3.698-3.953 μm = 36976-39528 Å (obs) = 4219-4510 Å (rest)
+  Region 2: 4.120-4.536 μm = 41197-45358 Å (obs) = 4700-5175 Å (rest)
+[Cell 6] ✅ SUCCESS
+
+[Cell 8] Executing...
+Preview: # Config with include region
+groups = [{'name': 'continuum_balmer'}]
+groups.appe...
+name continuum_balmer
+
+Continuum regions (redward of Balmer break):
+  Region 1: 3.698-3.953 μm = 4219-4510 Å (rest)
+  Region 2: 4.120-4.536 μm = 4700-5175 Å (rest)
+[Cell 8] ✅ SUCCESS
+
+[Cell 10] Executing...
+Preview: # Config with include + exclude
+groups = [{'name': 'continuum_balmer'}]
+groups.a...
+name continuum_balmer
+
+Continuum regions (excluding iron feature):
+0 [3.69757247 3.9527601 ]
+  Region 1: 3.698-3.953 μm = 4219-4510 Å (rest)
+1 [4.11969666 4.53583722]
+  Region 2: 4.120-4.536 μm = 4700-5175 Å (rest)
+[Cell 10] ✅ SUCCESS
+
+[Cell 12] Executing...
+Preview: # Config with multiple windows
+config_windows = {
+    'Unit': 'Angstrom',
+    'N...
+[Cell 12] ❌ ERROR: index 0 is out of bounds for axis 0 with size 0
+
+[Cell 14] Executing...
+Preview: # Choose which config to use
+config = config_noFe
+
+# Run fit
+print(f"\nRunning f...
+
+Running fit with config: continuum_balmer
+Include: (3700, 6000)
+Exclude: (4400, 4650)
+
+[Cell 14] ❌ ERROR: cannot import name 'estimateBlackbodyTemperature' from 'unite.initial' (/Users/ivo/Astro/PROJECTS/UNCOVER/sci/deep/unite/unite/initial.py)
+
+[Cell 16] Executing...
+Preview: # Extract samples
+samples = fit_results.samples
+
+# Get continuum parameters
+temp...
+[Cell 16] ❌ ERROR: name 'fit_results' is not defined
+
+[Cell 18] Executing...
+Preview: fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+# Temperature histogram
+axes[0]...
+[Cell 18] ❌ ERROR: name 'temp_samples' is not defined
+
+[Cell 20] Executing...
+Preview: # Get spectrum data
+wave = spec.wave
+flux = spec.flux
+err = spec.err
+
+# Get fitt...
+[Cell 20] ❌ ERROR: name 'samples' is not defined
+
+[Cell 22] SKIPPED (commented example)
+
+[Cell 24] Executing...
+Preview: # Example: Exclude telluric regions (observed frame)
+config_telluric = {
+    'Un...
+[Cell 24] ❌ ERROR: index 0 is out of bounds for axis 0 with size 0
+
+======================================================================
+TEST SUMMARY
+======================================================================
+
+❌ 6 errors found:
+
+  - Cell 12: IndexError: index 0 is out of bounds for axis 0 with size 0
+  - Cell 14: ImportError: cannot import name 'estimateBlackbodyTemperature' from 'unite.initial' (/Users/ivo/Astro/PROJECTS/UNCOVER/sci/deep/unite/unite/initial.py)
+  - Cell 16: NameError: name 'fit_results' is not defined
+  - Cell 18: NameError: name 'temp_samples' is not defined
+  - Cell 20: NameError: name 'samples' is not defined
+  - Cell 24: IndexError: index 0 is out of bounds for axis 0 with size 0
