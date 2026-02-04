@@ -55,6 +55,14 @@ fwhm: dict[str, tuple[float]] = {
     'exponential': (200, 7500),
 }
 
+# Temperature bounds (Kelvin) for blackbody continuum
+temperature: dict[str, tuple[float]] = {
+    'hot': (15_000.0, 50_000.0),  # Hot stars, AGN
+    'warm': (2_000.0, 10_000.0),  # Warm dust
+    'cold': (20.0, 1_500.0),  # Cold dust
+    'default': (1_000.0, 30_000.0),  # Full range
+}
+
 
 def convertToArray(priorDict: dict[str, tuple[float]]) -> jnp.ndarray:
     """

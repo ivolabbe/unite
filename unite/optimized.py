@@ -7,7 +7,7 @@ from typing import Final
 
 # JAX packages
 from jax.scipy.special import erf, erfc
-from jax import config, jit, vmap, lax, numpy as jnp
+from jax import config, jit, vmap, lax, numpy as jnp, nn
 
 # Conversion factor from FWHM to sigma for variance = 1/2
 # σ = fwhm / ( 2 * sqrt( 2 * ln(2) ) )
@@ -438,3 +438,96 @@ def powerLawContinuum(λ: jnp.ndarray, λ0: float, a: float, β: float) -> jnp.n
     """
 
     return a * ((λ / λ0) ** β)
+
+
+# Physical constants (SI units)
+_H: Final[float] = 6.62607015e-34  # Planck constant (J·s)
+_C_SI: Final[float] = 2.99792458e8  # Speed of light (m/s)
+_KB: Final[float] = 1.380649e-23  # Boltzmann constant (J/K)
+
+
+@jit
+def _safe_log_expm1(x: jnp.ndarray) -> jnp.ndarray:
+    """
+    Compute log(exp(x) - 1) with numerically stable gradients.
+
+    CRITICAL: This function prevents gradient overflow in Planck function.
+    For large x (> ~10): log(exp(x) - 1) ≈ x
+    For small x: use log(expm1(x))
+
+    Parameters
+    ----------
+    x : jnp.ndarray
+        Input values
+
+    Returns
+    -------
+    jnp.ndarray
+        log(exp(x) - 1) computed with numerical stability
+    """
+    # Use smooth sigmoid transition around x=10
+    alpha = nn.sigmoid((x - 10.0) / 3.0)
+
+    # For large x: just return x
+    large_x_approx = x
+
+    # For small x: compute log(expm1(x)) safely
+    # Clip x to avoid overflow in expm1 (expm1 overflows around x=90)
+    x_safe = jnp.minimum(x, 50.0)
+    small_x_value = jnp.log(jnp.maximum(jnp.expm1(x_safe), 1e-100))
+
+    # Blend between the two
+    return jnp.where(x > 50.0, x, alpha * large_x_approx + (1 - alpha) * small_x_value)
+
+
+@jit
+def planck_function(
+    wavelength_micron: jnp.ndarray, temperature_k: jnp.ndarray, pivot_micron: float = 0.5
+) -> jnp.ndarray:
+    """
+    Compute normalized Planck function B_λ(T) / B_λ(pivot, T).
+
+    CRITICAL: Uses pre-computed constants to avoid gradient overflow.
+    See CLAUDE.md section on "Gradient Overflow with Physical Constants".
+
+    Parameters
+    ----------
+    wavelength_micron : jnp.ndarray
+        REST-FRAME wavelengths in microns
+    temperature_k : jnp.ndarray
+        Temperature in Kelvin
+    pivot_micron : float
+        Pivot wavelength for normalization (microns), default 0.5
+
+    Returns
+    -------
+    jnp.ndarray
+        Normalized Planck function (= 1.0 at pivot wavelength)
+    """
+    # Clip temperature to valid range
+    temperature_k = jnp.clip(temperature_k, 20.0, 1e5)
+
+    # Convert to meters
+    wavelength_m = wavelength_micron * 1e-6
+    pivot_m = pivot_micron * 1e-6
+
+    # Pre-compute constants to avoid gradient overflow
+    # Computing (_H * _C_SI) / (wavelength_m * _KB * temperature_k) directly
+    # causes -inf gradients in JAX. Instead, pre-compute the constant part.
+    const_wave = (_H * _C_SI) / (wavelength_m * _KB)
+    const_pivot = (_H * _C_SI) / (pivot_m * _KB)
+
+    x_wave = const_wave / temperature_k
+    x_pivot = const_pivot / temperature_k
+
+    # Clip to valid range for numerical stability
+    x_wave = jnp.clip(x_wave, 0.01, 200.0)
+    x_pivot = jnp.clip(x_pivot, 0.01, 200.0)
+
+    # Planck law: B_λ ∝ λ^-5 / (exp(hc/λkT) - 1)
+    # Normalized: (λ_pivot/λ)^5 * [exp(x_pivot) - 1] / [exp(x_wave) - 1]
+    log_wavelength_ratio = -5.0 * jnp.log(wavelength_micron / pivot_micron)
+    log_expm1_diff = _safe_log_expm1(x_pivot) - _safe_log_expm1(x_wave)
+
+    # Clip final result to prevent overflow
+    return jnp.exp(jnp.clip(log_wavelength_ratio + log_expm1_diff, -100.0, 100.0))

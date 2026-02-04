@@ -204,3 +204,41 @@ def flux_scale_prior(mean=1.1, sig=0.2, cutoff=3.0) -> dist.Distribution:
     """
 
     return dist.TruncatedNormal(loc=mean, scale=sig, low=mean - cutoff * sig, high=mean + cutoff * sig)
+
+
+def temperature_prior(low: float = 1000.0, high: float = 30000.0) -> dist.Distribution:
+    """
+    Return a uniform prior for blackbody temperature
+
+    Parameters
+    ----------
+    low : float
+        Lower bound in Kelvin
+    high : float
+        Upper bound in Kelvin
+
+    Return
+    ------
+    dist.Distribution
+        Prior distribution for temperature
+    """
+    return dist.Uniform(low=low, high=high)
+
+
+def amplitude_prior(guess: float) -> dist.Distribution:
+    """
+    Return a lognormal prior for continuum amplitude
+
+    Parameters
+    ----------
+    guess : float
+        Initial guess for amplitude (median of continuum height guesses)
+
+    Return
+    ------
+    dist.Distribution
+        Prior distribution for amplitude
+    """
+    # Use log-normal prior centered on the guess with scale=1.0
+    # Ensures amplitude stays positive
+    return dist.LogNormal(loc=jnp.log(jnp.maximum(guess, 0.01)), scale=1.0)
