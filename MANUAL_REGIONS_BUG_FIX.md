@@ -34,13 +34,28 @@ Modified `unite/initial.py` lines 176-313:
 2. Lines 242-247: Added logic to store manual bounds and fall through for line-fitting mode
 3. Lines 296-311: Added intersection logic to combine automatic line-padded regions with manual bounds
 
-## Testing Status
-- Environment fixed (scipy import issue resolved with fresh install)
-- Region computation verified: Lines ARE in computed regions
-- **Outstanding issue**: Line models still appear tiny in fits (peak ~0.004 vs continuum ~0.6)
-  - This affects both manual and automatic region modes
-  - Fitted integrated fluxes are reasonable (~500-1500)
-  - May be separate issue from manual regions bug
+## Additional Bug Found: Line Flux Units (×10^4 factor)
 
-## Next Steps
-User should test with their data to verify manual regions now work correctly for line fitting.
+While testing the manual regions fix, discovered a second bug:
+
+**Problem**: Line models appeared 10000× too small (peak ~0.004 vs expected ~0.4)
+
+**Cause**: `lineFluxGuess()` computed flux in units of [fλ × μm] but model expected [fλ × Å]
+
+**Fix**: Added `flux *= 1e4` to convert μm to Å (1 μm = 10^4 Å)
+
+**Result**: Line models now have correct amplitude matching observed data
+
+## Testing Status
+✅ Environment fixed (scipy import resolved)
+✅ Region computation verified
+✅ Line flux units fixed (×10^4 conversion)
+✅ Both fixes tested together successfully
+
+**Test Results**:
+- Without manual regions: Lines visible (peak 0.487 vs continuum 0.111 = 439%)
+- With manual regions: Lines visible (peak 0.317 vs continuum 0.160 = 199%)
+
+## Commits
+1. `93d3245`: Fix manual regions excluding line data
+2. `129644e`: Fix line flux units with ×10^4 conversion
