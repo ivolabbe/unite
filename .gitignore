@@ -6,5 +6,4 @@ dist/
 .pixi
 *.egg-info
 
-examples/
-!*example.ipynb
+tests/
