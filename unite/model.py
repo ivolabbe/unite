@@ -190,7 +190,7 @@ def multiSpecModelV2(
     linetypes_all: Tuple[jnp.ndarray, List[jnp.ndarray], List[jnp.ndarray]],
     line_centers: jnp.ndarray,
     line_estimates_eq: jnp.ndarray,
-    cont_regs: jnp.ndarray,
+    fit_regions: jnp.ndarray,
     continuum_model,  # ContinuumModel instance
     return_components: bool = False,
 ) -> None:
@@ -211,8 +211,8 @@ def multiSpecModelV2(
         Line centers in REST-FRAME
     line_estimates_eq : jnp.ndarray
         Equalized line estimates
-    cont_regs : jnp.ndarray
-        Continuum regions in OBSERVED-FRAME (microns)
+    fit_regions : jnp.ndarray
+        Fitting regions in OBSERVED-FRAME (microns)
     continuum_model : ContinuumModel
         Continuum model instance (LinearContinuum, BlackbodyContinuum, etc.)
 
@@ -223,62 +223,75 @@ def multiSpecModelV2(
     # Build Spectrum Calibration
     calib = NIRSpecCalibration(spectra.names, spectra.fixed)
 
-    # Unpack matrices
-    orig, add, orig_add = matrices
+    # Check if continuum-only mode (no line fitting)
+    continuum_only = getattr(continuum_model, 'continuum_only', False)
+    Nlines = len(line_centers)
 
-    # Unpack line types
-    linetypes, lts_orig, lts_add = linetypes_all
-
-    # Map linetypes to optimized profile indices
-    type_idx = jnp.zeros_like(linetypes, dtype=jnp.int32)
-    type_idx = jnp.where(linetypes == defaults.LINETYPES['lorentzian'], optimized.LORENTZIAN, type_idx)
-    type_idx = jnp.where(linetypes == defaults.LINETYPES['exponential'], optimized.EXPONENTIAL, type_idx)
-
-    # Build the line parameters
-    params = {}
-    all_ps = (('flux', priors.flux_prior), ('redshift', priors.redshift_prior), ('fwhm', priors.fwhm_prior))
-    for i, (M_orig, lt_orig, M_add, lt_add, M_orig_add, p) in enumerate(
-        zip(orig, lts_orig, add, lts_add, orig_add, all_ps)
-    ):
-        label, prior = p
-        N_orig = M_orig.shape[0]
-        with plate(f'N_{label}_orig = {N_orig}', N_orig):
-            p_orig = sample(f'{label}_orig', prior(lt_orig))
-
-        N_add = M_add.shape[0]
-        if N_add:
-            with plate(f'N_{label}_add = {N_add}', N_add):
-                p_add = sample(f'{label}_add', prior(lt_add, p_orig @ M_orig_add))
-            params[label] = p_orig @ M_orig + p_add @ M_add
-        else:
-            params[label] = p_orig @ M_orig
-
-    # Compute line fluxes
-    fluxes = determ('flux_all', params['flux'] * line_estimates_eq)
-
-    # Add initial redshift
-    redshift = determ('redshift_all', params['redshift'] + spectra.redshift_initial)
-    oneplusz = 1 + redshift
-
-    # Get centers at the wavelength
-    centers = line_centers * oneplusz
-
-    # Transform fwhms into wavelength units
-    fwhms = centers * determ('fwhm_all', params['fwhm']) / C
-
-    # Convert continuum regions to REST-FRAME for continuum model
-    cont_regs_rest = cont_regs / (1 + spectra.redshift_initial)
+    # Convert fitting regions to REST-FRAME for continuum model
+    fit_regions_rest = fit_regions / (1 + spectra.redshift_initial)
 
     # Sample continuum parameters
-    cont_params = continuum_model.sample_params(sample, cont_regs_rest)
+    cont_params = continuum_model.sample_params(sample, fit_regions_rest)
 
-    # For LinearContinuum, we need cont_centers for EW calculation
-    cont_centers = determ('cont_center', cont_regs_rest.mean(axis=1))
+    # Region centers
+    cont_centers = determ('cont_center', fit_regions_rest.mean(axis=1))
 
-    # Compute equivalent widths using continuum at line centers (REST-FRAME)
-    centers_rest = line_centers  # Already in rest frame
-    linecont = continuum_model.evaluate(centers_rest, cont_params, cont_regs_rest)
-    determ('ew_all', fluxes / (linecont * oneplusz))
+    if not continuum_only:
+        # --- Line parameters ---
+        # Unpack matrices
+        orig, add, orig_add = matrices
+
+        # Unpack line types
+        linetypes, lts_orig, lts_add = linetypes_all
+
+        # Map linetypes to optimized profile indices
+        type_idx = jnp.zeros_like(linetypes, dtype=jnp.int32)
+        type_idx = jnp.where(linetypes == defaults.LINETYPES['lorentzian'], optimized.LORENTZIAN, type_idx)
+        type_idx = jnp.where(linetypes == defaults.LINETYPES['exponential'], optimized.EXPONENTIAL, type_idx)
+
+        # Build the line parameters
+        params = {}
+        all_ps = (('flux', priors.flux_prior), ('redshift', priors.redshift_prior), ('fwhm', priors.fwhm_prior))
+        for i, (M_orig, lt_orig, M_add, lt_add, M_orig_add, p) in enumerate(
+            zip(orig, lts_orig, add, lts_add, orig_add, all_ps)
+        ):
+            label, prior = p
+            N_orig = M_orig.shape[0]
+            with plate(f'N_{label}_orig = {N_orig}', N_orig):
+                p_orig = sample(f'{label}_orig', prior(lt_orig))
+
+            N_add = M_add.shape[0]
+            if N_add:
+                with plate(f'N_{label}_add = {N_add}', N_add):
+                    p_add = sample(f'{label}_add', prior(lt_add, p_orig @ M_orig_add))
+                params[label] = p_orig @ M_orig + p_add @ M_add
+            else:
+                params[label] = p_orig @ M_orig
+
+        # Compute line fluxes
+        fluxes = determ('flux_all', params['flux'] * line_estimates_eq)
+
+        # Add initial redshift
+        redshift = determ('redshift_all', params['redshift'] + spectra.redshift_initial)
+        oneplusz = 1 + redshift
+
+        # Get centers at the wavelength
+        centers = line_centers * oneplusz
+
+        # Transform fwhms into wavelength units
+        fwhms = centers * determ('fwhm_all', params['fwhm']) / C
+
+        # Compute equivalent widths using continuum at line centers (REST-FRAME)
+        linecont = continuum_model.evaluate(line_centers, cont_params, fit_regions_rest)
+        safe_cont = jnp.where(jnp.abs(linecont) > 0, linecont, 1.0)
+        determ('ew_all', fluxes / (safe_cont * oneplusz))
+
+    else:
+        # --- Continuum-only: zero-valued line placeholders ---
+        fluxes = determ('flux_all', jnp.zeros(Nlines))
+        determ('redshift_all', jnp.full(Nlines, spectra.redshift_initial))
+        determ('fwhm_all', jnp.zeros(Nlines))
+        determ('ew_all', jnp.zeros(Nlines))
 
     # Loop over spectra
     for spectrum in spectra.spectra:
@@ -295,23 +308,32 @@ def multiSpecModelV2(
 
         wave = determ(f'{spectrum.name}_wave', wave)
 
-        # Get the LSF of the lines
-        fwhms_lsf = determ(f'{spectrum.name}_lsf', spectrum.lsf(centers, lsf_scale))
+        if not continuum_only:
+            # Get the LSF of the lines
+            fwhms_lsf = determ(f'{spectrum.name}_lsf', spectrum.lsf(centers, lsf_scale))
 
-        # Integrate pixels
-        pixints = optimized.integrate(low, high, centers, fwhms_lsf, fwhms, type_idx).T
+            # Integrate pixels
+            pixints = optimized.integrate(low, high, centers, fwhms_lsf, fwhms, type_idx).T
 
-        # Divide by bin width to compute flux density
-        fλ = pixints / (high - low)[:, jnp.newaxis]
+            # Divide by bin width to compute flux density
+            fλ = pixints / (high - low)[:, jnp.newaxis]
 
-        # Multiply by line fluxes
-        lines = determ(f'{spectrum.name}_lines', fluxes * fλ)
+            # Multiply by line fluxes
+            lines = determ(f'{spectrum.name}_lines', fluxes * fλ)
+        else:
+            Npix = len(wave)
+            determ(f'{spectrum.name}_lsf', jnp.zeros(Nlines))
+            lines = determ(f'{spectrum.name}_lines', jnp.zeros((Npix, Nlines)))
+
+        # Shift fitting regions by pixel offset (matches v1 cont_regs_shift behavior)
+        fit_regions_shift = fit_regions - spectrum.offset(fit_regions, pixel_offset)
+        fit_regions_rest_shift = fit_regions_shift / (1 + spectra.redshift_initial)
 
         # Compute continuum (in REST-FRAME wavelengths)
         wave_rest = wave / (1 + spectra.redshift_initial)
         continuum = determ(
             f'{spectrum.name}_cont',
-            continuum_model.evaluate(wave_rest, cont_params, cont_regs_rest),
+            continuum_model.evaluate(wave_rest, cont_params, fit_regions_rest_shift),
         )
 
         # Compute model

@@ -120,6 +120,26 @@ def angle_prior() -> dist.Distribution:
     return dist.Uniform(low=-jnp.pi / 2, high=jnp.pi / 2)
 
 
+def tilt_prior(offset_guess: jnp.ndarray) -> dist.Distribution:
+    """Uniform prior for the normalized continuum tilt.
+
+    The tilt is the flux change from region center to edge, so it has
+    the same units as the flux.  ``tilt = offset`` means the flux doubles
+    from center to edge — already an extreme slope.
+
+    Parameters
+    ----------
+    offset_guess : jnp.ndarray
+        Continuum height guess (sets the scale).
+
+    Returns
+    -------
+    dist.Distribution
+    """
+    scale = jnp.abs(offset_guess)
+    return dist.Uniform(low=-scale, high=scale)
+
+
 def height_prior(height_guess: float) -> dist.Distribution:
     """
     Return a uniform prior for the height of the continuum

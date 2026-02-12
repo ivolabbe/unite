@@ -76,6 +76,7 @@ def plotRegion(
     ax.errorbar(wave[mask], flux[mask], yerr=err[mask], fmt='none', color='k')
 
     # Check if model samples match the wave array
+    m = None
     if model_samples.shape[1] == len(wave):
         for k in range(model_samples.shape[0]):
             ax.plot(
@@ -288,7 +289,7 @@ def plotRegion(
     )
     rest_ax.tick_params(axis='x', which='minor', length=tick_length * 0.3, width=tick_width * 0.8)
 
-    if resid_ax is not None:
+    if resid_ax is not None and m is not None:
         resid = (flux[mask] - m[mask]) / err[mask]
         resid_ax.plot(wave[mask], resid, color='k', ds='steps-mid')
         resid_ax.axhline(0, color='r', linestyle='--', alpha=0.5)
@@ -413,8 +414,8 @@ def plotResults(
 
     os.makedirs(f'{output_dir}/Plots/', exist_ok=True)
 
-    spectra, _, _, line_centers, _, cont_regs, _ = model_args
-    Nspec, Nregs = len(spectra.spectra), len(cont_regs)
+    spectra, _, _, line_centers, _, fit_regions, _ = model_args
+    Nspec, Nregs = len(spectra.spectra), len(fit_regions)
 
     # Increased height slightly to accommodate residuals
     figsize = (7.5 * Nregs, 7.5 * Nspec)
@@ -451,7 +452,7 @@ def plotResults(
             current_plot_kwargs["yscale"] = "linear"
 
         for j in range(Nregs):
-            cont_reg = cont_regs[j]
+            cont_reg = fit_regions[j]
 
             # Create inner grid for main plot + residual
             inner_grid = outer_grid[i, j].subgridspec(2, 1, height_ratios=[4, 1], hspace=0)
@@ -574,12 +575,11 @@ def plotRegionSingle(
         components, config = get_components_fit(config, model_args, samples)
 
     # Unpack necessary info from model_args
-    # spectra, matrices, linetypes_all, line_centers, line_estimates_eq, cont_regs, cont_guesses
-    _, _, _, line_centers, _, cont_regs, _ = model_args
+    _, _, _, line_centers, _, fit_regions, _ = model_args
 
     # Get spectrum data
     spec_r = deepcopy(spec)
-    spec_r.restrict(cont_regs)
+    spec_r.restrict(fit_regions)
     _, wave, _, flux, err = spec_r()
 
     # Get model samples for this spectrum
@@ -636,7 +636,7 @@ def plotLines(ax, config, model_args) -> None:
 
     # Iterate over configuration
     names, centers = [], []
-    for group in config['Groups'].items():
+    for group in config['Groups'].values():
         for species in group['Species']:
             for line in species['Lines']:
                 # Get the line center
@@ -685,3 +685,103 @@ def plotLines(ax, config, model_args) -> None:
 def logbarrier(x, xlim, linelocs, norm):
     y = np.concatenate([[xlim[0]], x, [xlim[1]]])
     return np.square(x - linelocs).sum() - np.log(y[1:] - y[:-1]).sum() / norm
+
+
+def plotFullSpectrum(
+    config: dict,
+    rows: Table,
+    output_dir: str,
+    samples: dict | None = None,
+    model_args: tuple | None = None,
+    wavelength_range: Tuple[float, float] | None = None,
+    figsize: Tuple[float, float] = (12, 5),
+    rescale_errors: bool = False,
+) -> Tuple[pyplot.Figure, pyplot.Axes]:
+    """
+    Plot the full spectrum with the model fit.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary
+    rows : Table
+        Table of the rows
+    output_dir : str
+        Directory to load results from
+    samples : dict, optional
+        Samples from the MCMC. If None, will try to load from disk.
+    model_args : tuple, optional
+        Arguments for the model. If None, will be computed.
+    wavelength_range : Tuple[float, float], optional
+        Wavelength range to plot (min, max) in microns
+    figsize : Tuple[float, float]
+        Figure size
+    rescale_errors : bool
+        Whether errors were rescaled during fitting
+
+    Returns
+    -------
+    fig : pyplot.Figure
+        The figure object
+    ax : pyplot.Axes
+        The axes object
+    """
+    cname = '_' + config['Name'] if config['Name'] else ''
+
+    from unite.fitting import NIRSpecModelArgs
+
+    if model_args is None:
+        _, model_args = NIRSpecModelArgs(config, rows=rows, rescale_errors=rescale_errors)
+
+    if samples is None:
+        savename = f'{output_dir}/Results/{rows[0]["root"]}-{rows[0]["srcid"]}{cname}'
+        samples = np.load(f'{savename}_full.npz')
+
+    spectra, _, _, line_centers, _, fit_regions, _ = model_args
+    best_model_idx = samples['logP'].argmax()
+
+    fig, ax = pyplot.subplots(figsize=figsize)
+
+    for spectrum in spectra.spectra:
+        _, wave, _, flux, err = spectrum()
+        model_samples = samples[f'{spectrum.name}_model']
+        best_model = model_samples[best_model_idx]
+
+        # Plot data
+        ax.plot(wave, flux, color='k', ds='steps-mid', label='Data' if spectrum == spectra.spectra[0] else None)
+        ax.fill_between(wave, flux - err, flux + err, alpha=0.2, color='gray', step='mid')
+
+        # Plot model samples
+        for k in range(model_samples.shape[0]):
+            ax.plot(
+                wave,
+                model_samples[k],
+                color='#E20134',
+                alpha=np.clip(5 / len(model_samples), 0.01, 0.3),
+                ds='steps-mid',
+            )
+
+        # Plot best fit
+        ax.plot(wave, best_model, color='#A40122', alpha=1, lw=1.5, ds='steps-mid',
+                label='Model' if spectrum == spectra.spectra[0] else None)
+
+    # Mark fitting regions
+    for region in fit_regions:
+        ax.axvspan(region[0], region[1], alpha=0.05, color='blue')
+
+    # Mark line centers
+    oneplusz = 1 + spectra.redshift_initial
+    for lc in jnp.unique(line_centers):
+        ax.axvline(lc * oneplusz, color='gray', linestyle='--', alpha=0.3, lw=0.5)
+
+    ax.axhline(0, color='gray', linestyle=':', alpha=0.5, lw=1)
+
+    if wavelength_range is not None:
+        ax.set_xlim(wavelength_range)
+
+    ax.set_xlabel(r'$\lambda$ (Observed) [$\mu$m]')
+    ax.set_ylabel(r'$f_\lambda$ [10$^{-20}$ erg s$^{-1}$ cm$^{-2}$ \AA$^{-1}$]')
+    ax.legend(loc='upper right')
+    ax.set_title(f'{rows[0]["srcid"]} ({rows[0]["root"]}): $z = {spectra.redshift_initial:.3f}$')
+
+    return fig, ax

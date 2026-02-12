@@ -416,6 +416,50 @@ def linearContinua(
 
 
 @jit
+def linearContinuaNorm(
+    λ: jnp.ndarray,
+    tilts: jnp.ndarray,
+    offsets: jnp.ndarray,
+    continuum_regions: jnp.ndarray,
+) -> jnp.ndarray:
+    """Piecewise linear continuum with normalized tilt parameterization.
+
+    Uses a frame-invariant parameterization where ``tilt`` is the flux change
+    from region center to edge (same units as flux).  The normalized coordinate
+    ``x = (λ - center) / half_width`` is dimensionless and identical in any
+    reference frame.
+
+    Parameters
+    ----------
+    λ : jnp.ndarray
+        Wavelength values (any frame).
+    tilts : jnp.ndarray
+        Tilt per region — flux change from center to edge.
+    offsets : jnp.ndarray
+        Flux level at region center.
+    continuum_regions : jnp.ndarray
+        Region bounds, shape ``(N, 2)``.
+
+    Returns
+    -------
+    jnp.ndarray
+        Flux values, shape ``(len(λ), N)``.
+    """
+    half_widths = (continuum_regions[:, 1] - continuum_regions[:, 0]) / 2
+    cont_centers = continuum_regions.mean(axis=1)
+
+    λ = λ[:, jnp.newaxis]
+    x = (λ - cont_centers) / half_widths  # dimensionless, ∈ [-1, 1]
+    continuum = offsets + tilts * x
+
+    return jnp.where(
+        jnp.logical_and(continuum_regions[:, 0] < λ, λ < continuum_regions[:, 1]),
+        continuum,
+        0.0,
+    )
+
+
+@jit
 def powerLawContinuum(λ: jnp.ndarray, λ0: float, a: float, β: float) -> jnp.ndarray:
     """
     Compute the power law continuum

@@ -5,6 +5,7 @@ Fitting functions for spectral data
 # Standard library
 import re
 import os
+from copy import deepcopy
 
 # Typing
 from typing import Dict, Tuple
@@ -30,9 +31,25 @@ from unite.model import multiSpecModel, multiSpecModelV2
 from unite.spectra import NIRSpecSpectra
 from unite import utils, initial, parameters
 from unite.continuum import parse_continuum_config
+from unite import defaults
+from unite.defaults import FittingMode
 
 # Plotting packages
 from matplotlib import pyplot
+
+
+def _infer_fitting_mode(config: dict) -> FittingMode:
+    """Infer fitting mode from config.
+
+    Explicit ``config['fitting_mode']`` takes precedence.
+    Otherwise: linear continuum → ``LINES``, anything else → ``FULL``.
+    """
+    if 'fitting_mode' in config:
+        return FittingMode(config['fitting_mode'])
+    cont_type = config.get('continuum', {}).get('type', 'linear').lower()
+    if cont_type == 'linear':
+        return FittingMode.LINES
+    return FittingMode.FULL
 
 
 def NIRSpecFit(
@@ -110,9 +127,14 @@ def NIRSpecModelArgs(
     tuple
         (config, model_args) where model_args depends on model_version
     """
-    # Load the spectra
+    # Load the spectra (make a deep copy to avoid mutating the input)
     if spectra is None:
         spectra = NIRSpecSpectra(rows)
+    else:
+        spectra = deepcopy(spectra)
+
+    # Apply config-specified default overrides (e.g. CONTINUUM, LINEPAD)
+    defaults.apply_config_defaults(config)
 
     # Restrict config to what we have coverage of
     config = utils.restrictConfig(config, spectra)
@@ -124,14 +146,34 @@ def NIRSpecModelArgs(
     # Generate Parameter Matrices
     matrices, linetypes_all = parameters.configToMatrices(config)
 
-    # Compute Continuum Regions and Initial Guesses
-    cont_regs, cont_guesses = initial.computeContinuumRegions(config, spectra)
+    # Determine fitting mode: explicit config value, or infer from continuum type
+    fitting_mode = _infer_fitting_mode(config)
+
+    # Compute fitting regions and initial continuum guesses
+    fit_regions, cont_guesses = initial.compute_fit_regions(config, spectra, mode=fitting_mode)
 
     # Compute Line Centers and Equalized estimates
-    line_centers, line_estimates_eq = initial.linesFluxesGuess(config, spectra, cont_regs, cont_guesses)
+    line_centers, line_estimates_eq = initial.linesFluxesGuess(config, spectra, fit_regions, cont_guesses)
 
-    # Restrict spectra to continuum regions and rescale errorbars in each region
-    spectra.restrictAndRescale(config, cont_regs, rescale_errors=rescale_errors)
+    # Restrict spectra to fitting regions and rescale errorbars in each region
+    spectra.restrictAndRescale(config, fit_regions, rescale_errors=rescale_errors)
+
+    # In CONTINUUM mode, mask emission-line pixels so only continuum is fitted
+    # Uses defaults.CONTINUUM as the masking width (single width for all lines)
+    if fitting_mode == FittingMode.CONTINUUM:
+        for spectrum in spectra.spectra:
+            mask = np.ones(len(spectrum.wave), dtype=bool)
+            for region in fit_regions:
+                mask &= spectrum.maskLines(
+                    config, region,
+                    broad_mask=defaults.CONTINUUM,
+                    narrow_mask=defaults.CONTINUUM,
+                )
+            for key in ['wave', 'low', 'high', 'flux', 'err', 'valid']:
+                setattr(spectrum, key, getattr(spectrum, key)[mask])
+        # Remove spectra left with no pixels
+        spectra.spectra = [s for s in spectra.spectra if len(s.wave) > 0]
+        spectra.names = [s.name for s in spectra.spectra]
 
     # Skip if no data
     if len(spectra.spectra) == 0:
@@ -145,20 +187,22 @@ def NIRSpecModelArgs(
             linetypes_all,
             line_centers,
             line_estimates_eq,
-            cont_regs,
+            fit_regions,
             cont_guesses,
         )
 
     # Model Args for V2 (with continuum interface)
     elif model_version == 'v2':
-        continuum_model = parse_continuum_config(config, cont_guesses)
+        continuum_model = parse_continuum_config(config)
+        continuum_model.initialize(spectra, cont_guesses)
+        continuum_model.continuum_only = (fitting_mode == FittingMode.CONTINUUM)
         return config, (
             spectra,
             matrices,
             linetypes_all,
             line_centers,
             line_estimates_eq,
-            cont_regs,
+            fit_regions,
             continuum_model,
         )
 
@@ -198,8 +242,16 @@ def MCMCFit(
     # Select model function
     model_fn = multiSpecModel if model_version == 'v1' else multiSpecModelV2
 
+    # Use init_params from continuum model if available (v2 only)
+    init_strategy = infer.init_to_uniform()
+    if model_version == 'v2':
+        continuum_model = model_args[-1]  # last element of model_args tuple
+        init_params = getattr(continuum_model, 'init_params', {})
+        if init_params:
+            init_strategy = infer.init_to_value(values=init_params)
+
     # MCMC
-    kernel = infer.NUTS(model_fn)
+    kernel = infer.NUTS(model_fn, init_strategy=init_strategy)
     mcmc = infer.MCMC(kernel, num_samples=N, num_warmup=num_warmup, progress_bar=verbose)
     mcmc.run(rng_key, *model_args)
 
@@ -209,8 +261,10 @@ def MCMCFit(
     # Compute relevant probabilities
     logL = computeProbs(samples, model_args, model_version=model_version)
 
-    # Compute the WAIC
-    waic = -2 * (np.log(np.exp(logL).mean(axis=0)).sum() - logL.var(axis=0, ddof=1).sum())
+    # Compute the WAIC (numerically stable via logsumexp)
+    from scipy.special import logsumexp
+    lppd = logsumexp(logL, axis=0) - np.log(logL.shape[0])
+    waic = -2 * (lppd.sum() - logL.var(axis=0, ddof=1).sum())
     extras = {'WAIC': waic}
 
     return samples, extras
@@ -341,7 +395,7 @@ def saveResults(config, rows, model_args, samples, extras, output_dir, model_ver
     savename = f'{output_dir}/Results/{rows[0]["root"]}-{rows[0]["srcid"]}{cname}'
 
     # Unpack model args (same structure for v1 and v2, last element differs)
-    spectra, _, _, _, _, cont_regs, _ = model_args
+    spectra, _, _, _, _, fit_regions, _ = model_args
 
     # Correct sample units
     samples['flux_all'] = samples['flux_all'] * (spectra.fλ_unit * spectra.λ_unit).to(
@@ -359,9 +413,10 @@ def saveResults(config, rows, model_args, samples, extras, output_dir, model_ver
     ]
     out = Table([samples[name] for name in colnames], names=colnames)
 
-    # Add continuum regions and error scales to samples
-    samples['cont_regs'] = np.array(cont_regs)
-    if hasattr(spectrum, 'errscales'):
+    # Add fitting regions and error scales to samples
+    samples['fit_regions'] = np.array(fit_regions)
+    samples['cont_regs'] = samples['fit_regions']  # backward compat alias
+    if hasattr(spectra.spectra[0], 'errscales'):
         samples.update(
             {f'{spectrum.name}_errscales': np.array(spectrum.errscales) for spectrum in spectra.spectra}
         )
@@ -370,7 +425,6 @@ def saveResults(config, rows, model_args, samples, extras, output_dir, model_ver
     np.savez(f'{savename}_full.npz', **samples)
 
     # Get names of the lines
-    # TODO: Better sanitization of line names?
     line_names = [
         (
             f'{group_name}_{species["Name"]}_{species["LineType"]}_{line["Wavelength"]}'
@@ -381,6 +435,18 @@ def saveResults(config, rows, model_args, samples, extras, output_dir, model_ver
         for species in group['Species']
         for line in species['Lines']
     ]
+
+    # Make line names unique by appending index suffix for duplicates
+    seen = {}
+    unique_names = []
+    for name in line_names:
+        if name in seen:
+            seen[name] += 1
+            unique_names.append(f'{name}_{seen[name]}')
+        else:
+            seen[name] = 0
+            unique_names.append(name)
+    line_names = unique_names
 
     # Append line parameter samples
     for colname, unit in zip(

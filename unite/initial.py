@@ -19,7 +19,7 @@ from unite.spectra import Spectra, Spectrum
 def linesFluxesGuess(
     config: list,
     spectra: Spectra,
-    cont_regs: jnp.ndarray,
+    fit_regions: jnp.ndarray,
     cont_guesses: jnp.ndarray,
     inner: u.Quantity = None,
 ) -> Tuple[jnp.ndarray, jnp.ndarray]:
@@ -32,8 +32,8 @@ def linesFluxesGuess(
         Spectra
     config : dict
         Configuration of emission lines
-    cont_regs : jnp.ndarray
-        Continuum regions
+    fit_regions : jnp.ndarray
+        Fitting regions (observed-frame)
     cont_guesses : jnp.ndarray
         Continuum height guesses
     inner : u.Quantity, optional
@@ -66,8 +66,8 @@ def linesFluxesGuess(
     opz = 1 + spectra.redshift_initial
     line_conts = cont_guesses[
         jnp.argmax(
-            (cont_regs[:, 0][None, :] <= centers[:, None] * opz)
-            & (opz * centers[:, None] <= cont_regs[:, 1][None, :]),
+            (fit_regions[:, 0][None, :] <= centers[:, None] * opz)
+            & (opz * centers[:, None] <= fit_regions[:, 1][None, :]),
             axis=1,
         )
     ]
@@ -142,11 +142,10 @@ def lineFluxGuess(spectrum: Spectrum, center: float, line_cont: float, inner: u.
     return flux
 
 
-def computeContinuumRegions(
-    config: list, spectra: Spectra, pad: u.Quantity = None
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Compute the continuum regions from the configuration
+def _line_regions(
+    config: dict, spectra: Spectra, pad: u.Quantity = None
+) -> jnp.ndarray:
+    """Compute observed-frame regions around emission lines (merged where overlapping).
 
     Parameters
     ----------
@@ -155,12 +154,12 @@ def computeContinuumRegions(
     spectra : Spectra
         Spectra
     pad : u.Quantity, optional
-        Region width around the lines
+        Velocity half-width around each line (default: ``defaults.CONTINUUM``)
 
     Returns
     -------
-    (np.ndarray, np.ndarray)
-        Continuum regions and continuum height guesses
+    jnp.ndarray
+        (N_regions, 2) array of [lo, hi] in observed-frame wavelength units
     """
     if pad is None:
         pad = defaults.CONTINUUM
@@ -175,30 +174,84 @@ def computeContinuumRegions(
         ]
     ) * u.Unit(config['Unit'])
 
-    # Compute pad in correct units
+    # Compute pad as fractional wavelength
     pad = (pad / consts.c).to(u.dimensionless_unscaled).value
 
-    # Generate continuum regions
+    # Generate per-line regions and merge overlapping ones
     allregs = lines[:, np.newaxis] + np.array([-1, 1]) * (pad * lines)[:, np.newaxis]
-    cont_regs = [allregs[0]]
+    merged = [allregs[0]]
     for region in allregs[1:]:
-        if region[0] < cont_regs[-1][1]:
-            cont_regs[-1][1] = region[1]
+        if region[0] < merged[-1][1]:
+            merged[-1][1] = region[1]
         else:
-            cont_regs.append(region)
+            merged.append(region)
 
-    # Convert to correct units and redshift
-    # if 'Region' in config:
-    #     config_region = u.Quantity(config['Region'], config['Unit']).to(spectra.λ_unit)
-    #     cont_regs = [
-    #         u.Quantity([np.maximum(reg[0], config_region[0]), np.minimum(reg[1], config_region[1])])
-    #         for reg in cont_regs
-    #     ]
+    # Convert to target wavelength units and apply redshift
+    regs_rest = jnp.array([r.to(spectra.λ_unit).value for r in merged])
+    return regs_rest * (1 + spectra.redshift_initial)
 
-    cont_regs_rest = jnp.array([cont_regs.to(spectra.λ_unit).value for cont_regs in cont_regs])
-    cont_regs_obs = cont_regs_rest * (1 + spectra.redshift_initial)
 
-    return cont_regs_obs, continuumHeightGuesses(cont_regs_obs, config, spectra)
+def _full_region(spectra: Spectra) -> jnp.ndarray:
+    """Single region spanning the full wavelength range of all spectra.
+
+    Returns
+    -------
+    jnp.ndarray
+        (1, 2) array of [lo, hi] in observed-frame wavelength units
+    """
+    lo = min(float(s.low.min()) for s in spectra.spectra)
+    hi = max(float(s.high.max()) for s in spectra.spectra)
+    return jnp.array([[lo, hi]])
+
+
+def compute_fit_regions(
+    config: dict,
+    spectra: Spectra,
+    mode: 'defaults.FittingMode | str' = defaults.FittingMode.LINES,
+    pad: u.Quantity = None,
+) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """Compute fitting regions and continuum height guesses.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration of emission lines
+    spectra : Spectra
+        Spectra
+    mode : FittingMode or str
+        Which pixels to include in the likelihood:
+        - ``'lines'``: regions around emission lines (current default)
+        - ``'full'``: entire spectral range
+        - ``'continuum'``: entire range (line masking applied later in spectra.restrict)
+    pad : u.Quantity, optional
+        Velocity half-width for ``'lines'`` mode
+
+    Returns
+    -------
+    (jnp.ndarray, jnp.ndarray)
+        Fitting regions (N, 2) and continuum height guesses (N,)
+    """
+    mode = defaults.FittingMode(mode)
+
+    if mode == defaults.FittingMode.LINES:
+        fit_regs = _line_regions(config, spectra, pad=pad)
+    elif mode in (defaults.FittingMode.FULL, defaults.FittingMode.CONTINUUM):
+        fit_regs = _full_region(spectra)
+    else:
+        raise ValueError(f'Unknown fitting mode: {mode}')
+
+    cont_guesses = continuumHeightGuesses(fit_regs, config, spectra)
+    return fit_regs, cont_guesses
+
+
+def computeContinuumRegions(
+    config: dict, spectra: Spectra, pad: u.Quantity = None
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute continuum regions around emission lines (backward-compatible wrapper).
+
+    See :func:`compute_fit_regions` for the general interface.
+    """
+    return compute_fit_regions(config, spectra, mode=defaults.FittingMode.LINES, pad=pad)
 
 
 def continuumHeightGuesses(
