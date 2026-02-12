@@ -6,4 +6,5 @@ dist/
 .pixi
 *.egg-info
 
-tests/
+# Personal experiments / debugging
+scratch/
