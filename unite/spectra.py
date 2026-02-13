@@ -89,52 +89,37 @@ class Spectra:
         self.spectra = [spectrum for spectrum in self.spectra if len(spectrum.wave) > 0]
         self.names = [spectrum.name for spectrum in self.spectra]
 
-    def rescale(self, config: dict, continuum_regions: list, linepad: u.Quantity) -> None:
-        """
-        Rescale the errorbars in each region
+    def rescale(self, continuum_regions: list) -> None:
+        """Rescale errorbars in each region using stored ``line_mask``.
 
         Parameters
         ----------
-        config : dict
-            Configuration dictionary
         continuum_regions : list
-            List of continuum regions
-        linepad : u.Quantity
-            Padding to mask emission lines
-
-        Returns
-        -------
-        None
+            List of continuum regions.
         """
-
         for spectrum in self.spectra:
-            spectrum.rescale(config, continuum_regions, linepad)
+            spectrum.rescale(continuum_regions)
 
     def restrictAndRescale(
         self,
         config: dict,
         continuum_regions: list,
-        linepad: u.Quantity = defaults.LINEPAD,
         rescale_errors: bool = True,
     ) -> None:
-        """
-        Restrict the spectra to the continuum regions and rescale the errorbars
+        """Restrict spectra to fitting regions and optionally rescale errorbars.
 
         Parameters
         ----------
         config : dict
-            Configuration dictionary
+            Configuration dictionary (kept for compatibility).
         continuum_regions : list
-            List of continuum regions
-
-        Returns
-        -------
-        None
+            List of continuum regions.
+        rescale_errors : bool
+            Whether to rescale errorbars per region.
         """
-
         self.restrict(continuum_regions)
         if rescale_errors:
-            self.rescale(config, continuum_regions, linepad)
+            self.rescale(continuum_regions)
 
 
 # NIRSpec Spectra
@@ -201,25 +186,15 @@ class NIRSpecSpectra(Spectra):
         # Initialize
         super().__init__(spectra=spectra, redshift_initial=redshift_initial, λ_unit=λ_unit, fλ_unit=fλ_unit)
 
-    def rescale(self, config: dict, continuum_regions: list, linepad: u.Quantity) -> None:
-        """
-        Rescale the errorbars in each region
+    def rescale(self, continuum_regions: list) -> None:
+        """Rescale errorbars in each region using stored ``line_mask``.
 
         Parameters
         ----------
-        config : dict
-            Configuration dictionary
         continuum_regions : list
-            List of continuum regions
-        linepad : u.Quantity
-            Padding to mask emission lines
-
-        Returns
-        -------
-        None
+            List of continuum regions.
         """
-
-        super().rescale(config, continuum_regions, linepad)
+        super().rescale(continuum_regions)
 
         # If no spectra are fixed, fix the first one
         if not any([spectrum.fixed for spectrum in self.spectra]):
@@ -353,6 +328,39 @@ class Spectrum:
         # Apply the mask
         for key in ['wave', 'low', 'high', 'flux', 'err', 'valid']:
             setattr(self, key, getattr(self, key)[mask])
+        if hasattr(self, 'line_mask'):
+            self.line_mask = self.line_mask[mask]
+
+    def compute_line_mask(self, config: dict) -> None:
+        """Compute a boolean mask over full arrays flagging line-contaminated pixels.
+
+        Uses config ``LineType`` to choose padding:
+        ``'broad'`` → ``defaults.LINEPAD``, all others → ``defaults.LINEDETECT``.
+        Stores result as ``self.line_mask`` (True = continuum, False = line).
+
+        Parameters
+        ----------
+        config : dict
+            Configuration with ``'Groups'`` and ``'Unit'`` keys.
+        """
+        opz = 1 + self.redshift_initial
+        pad_broad = (defaults.LINEPAD / consts.c).to(u.dimensionless_unscaled).value
+        pad_narrow = (defaults.LINEDETECT / consts.c).to(u.dimensionless_unscaled).value
+        λ_unit = u.Unit(config['Unit'])
+
+        _NARROW_TYPES = {'narrow', 'emission', 'absorption'}
+        mask = np.ones(len(self.wave), dtype=bool)
+        for group in config['Groups'].values():
+            for species in group['Species']:
+                line_type = species.get('LineType', 'narrow')
+                pad = pad_narrow if line_type in _NARROW_TYPES else pad_broad
+                for line in species['Lines']:
+                    linewav = (line['Wavelength'] * λ_unit).to(self.λ_unit).value * opz
+                    hw = linewav * pad
+                    linemask = np.logical_and(linewav - hw < self.wave, self.wave < linewav + hw)
+                    mask &= ~linemask
+
+        self.line_mask = mask
 
     # Mask lines in continuum regions
     def maskLines(
@@ -361,86 +369,59 @@ class Spectrum:
         continuum_region: np.ndarray,
         broad_mask: u.Quantity = defaults.LINEPAD,
         narrow_mask: u.Quantity = defaults.LINEPAD / 5.0,
-        broad_species: list = ['HI', 'He', 'Pa'],
         sigma_clip: float = 3.0,
         filter_length: int = 11,
         verbose: bool = False,
     ) -> np.ndarray:
-        """
-        Mask the lines in the continuum region
+        """Mask lines in a continuum region.
+
+        Uses config ``LineType`` to choose padding (no ``broad_species`` filter).
 
         Parameters
         ----------
-        continuum_region : np.ndarray
-            Boundary of the continuum region
         config : dict
-            Configuration of emission lines
-        spectrum : Spectrum
-            Spectrum
+            Configuration of emission lines.
+        continuum_region : np.ndarray
+            Boundary of the continuum region.
         broad_mask : u.Quantity
-            Masking width for broad lines (velocity)
+            Masking width for broad lines (velocity).
         narrow_mask : u.Quantity, optional
             Masking width for narrow lines (velocity). If None, uses broad_mask.
-        broad_species : list, optional
-            List of species to consider as broad.
         sigma_clip : float, optional
-            Sigma clipping threshold for outlier rejection. Defaults to 3.0.
+            Sigma clipping threshold for outlier rejection.
         filter_length : int, optional
-            Length of the median filter for outlier rejection. Defaults to 11.
+            Length of the median filter for outlier rejection.
         verbose : bool, optional
-            Print debug information. Defaults to False.
+            Print debug information.
 
         Returns
         -------
         np.ndarray
-            Masked region
+            Boolean mask (True = continuum, False = line).
         """
-
-        # Handle default narrow_mask
         if narrow_mask is None:
             narrow_mask = broad_mask
 
-        # Compute redshift
         opz = 1 + self.redshift_initial
-
-        # Convert masks to dimensionless padding
         pad_broad = (broad_mask / consts.c).to(u.dimensionless_unscaled).value
         pad_narrow = (narrow_mask / consts.c).to(u.dimensionless_unscaled).value
 
-        # Extract the region
         low, high = continuum_region
         mask = np.logical_and(low < self.wave, self.wave < high)
         mask = np.logical_and(mask, self.valid)
 
-        # Mask each line
+        _NARROW_TYPES = {'narrow', 'emission', 'absorption'}
         λ_unit = u.Unit(config['Unit'])
         for group in config['Groups'].values():
             for species in group['Species']:
-                # Determine line type
                 line_type = species.get('LineType', 'narrow')
-                is_broad = line_type == 'broad'
-
-                # Filter by species if list provided
-                if is_broad and (broad_species is not None):
-                    if species['Name'] not in broad_species:
-                        is_broad = False
-
-                # Select padding
-                pad = pad_broad if is_broad else pad_narrow
+                pad = pad_narrow if line_type in _NARROW_TYPES else pad_broad
 
                 for line in species['Lines']:
-                    # Compute the line wavelength
                     linewav = (line['Wavelength'] * λ_unit).to(self.λ_unit).value * opz
-
-                    # Get the effective padding
-                    this_linepad = linewav * pad
-
-                    # Compute the boundaries
-                    l, h = linewav - this_linepad, linewav + this_linepad
-
-                    # Mask the line
-                    linemask = np.logical_and(l < self.wave, self.wave < h)
-                    mask = np.logical_and(mask, np.invert(linemask))
+                    hw = linewav * pad
+                    linemask = np.logical_and(linewav - hw < self.wave, self.wave < linewav + hw)
+                    mask &= ~linemask
 
         # Iterative rejection of outliers
         if sigma_clip is not None:
@@ -517,49 +498,30 @@ class Spectrum:
         # Return scale that makes residuals have unit variance
         return np.sqrt(χ2_ν)
 
-    def rescale(self, config: dict, continuum_regions: list, linepad: u.Quantity) -> None:
-        """
-        Rescale the errorbars in each region
+    def rescale(self, continuum_regions: list) -> None:
+        """Rescale errorbars in each region using ``self.line_mask``.
 
         Parameters
         ----------
-        config : dict
-            Configuration dictionary
         continuum_regions : list
-            List of continuum regions
-        linepad : u.Quantity
-            Padding to mask emission lines
-
-        Returns
-        -------
-        None
+            List of continuum regions.
         """
-
-        # Loop over the continuum regions
         newerr = np.zeros_like(self.err)
         scales = []
         for region in continuum_regions:
-            # Compute the masks
             regmask = self.coverage(region[0], region[1], partial=False)
-            linemask = self.maskLines(config, region, linepad)
+            linemask = regmask & self.line_mask
 
-            # If not enough data, don't change errors
             # Need at least three points for reduced χ² of a line
             if np.sum(linemask) <= 2:
                 newerr = np.where(regmask, self.err, newerr)
                 continue
 
-            # Scale the errorbars
             scale = self.scaleErrorbars(linemask)
             scales.append(scale)
-
-            # Apply the scaling
             newerr = np.where(regmask, self.err * scale, newerr)
 
-        # Keep track of the scales
         self.errscales = scales
-
-        # Store the new errorbars
         self.err = newerr
 
 

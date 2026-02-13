@@ -149,29 +149,28 @@ def NIRSpecModelArgs(
     # Determine fitting mode: explicit config value, or infer from continuum type
     fitting_mode = _infer_fitting_mode(config)
 
-    # Compute fitting regions and initial continuum guesses
-    fit_regions, cont_guesses = initial.compute_fit_regions(config, spectra, mode=fitting_mode)
+    # Compute fitting regions (observed-frame)
+    fit_regions = initial.compute_fit_regions(config, spectra, mode=fitting_mode)
+
+    # Compute per-spectrum line mask on full (unrestricted) arrays
+    for spectrum in spectra.spectra:
+        spectrum.compute_line_mask(config)
+
+    # Restrict spectra to fitting regions and rescale errorbars
+    spectra.restrictAndRescale(config, fit_regions, rescale_errors=rescale_errors)
+
+    # Continuum height guesses (uses stored line_mask)
+    cont_guesses = initial.continuumHeightGuesses(fit_regions, spectra)
 
     # Compute Line Centers and Equalized estimates
     line_centers, line_estimates_eq = initial.linesFluxesGuess(config, spectra, fit_regions, cont_guesses)
 
-    # Restrict spectra to fitting regions and rescale errorbars in each region
-    spectra.restrictAndRescale(config, fit_regions, rescale_errors=rescale_errors)
-
-    # In CONTINUUM mode, mask emission-line pixels so only continuum is fitted
-    # Uses defaults.CONTINUUM as the masking width (single width for all lines)
+    # In CONTINUUM mode, remove emission-line pixels using stored mask
     if fitting_mode == FittingMode.CONTINUUM:
         for spectrum in spectra.spectra:
-            mask = np.ones(len(spectrum.wave), dtype=bool)
-            for region in fit_regions:
-                mask &= spectrum.maskLines(
-                    config, region,
-                    broad_mask=defaults.CONTINUUM,
-                    narrow_mask=defaults.CONTINUUM,
-                )
-            for key in ['wave', 'low', 'high', 'flux', 'err', 'valid']:
+            mask = spectrum.line_mask
+            for key in ['wave', 'low', 'high', 'flux', 'err', 'valid', 'line_mask']:
                 setattr(spectrum, key, getattr(spectrum, key)[mask])
-        # Remove spectra left with no pixels
         spectra.spectra = [s for s in spectra.spectra if len(s.wave) > 0]
         spectra.names = [s.name for s in spectra.spectra]
 

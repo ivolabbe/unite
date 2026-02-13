@@ -209,44 +209,41 @@ def compute_fit_regions(
     spectra: Spectra,
     mode: 'defaults.FittingMode | str' = defaults.FittingMode.LINES,
     pad: u.Quantity = None,
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    """Compute fitting regions and continuum height guesses.
+) -> jnp.ndarray:
+    """Compute fitting regions (observed-frame).
 
     Parameters
     ----------
     config : dict
-        Configuration of emission lines
+        Configuration of emission lines.
     spectra : Spectra
-        Spectra
+        Spectra.
     mode : FittingMode or str
         Which pixels to include in the likelihood:
         - ``'lines'``: regions around emission lines (current default)
         - ``'full'``: entire spectral range
-        - ``'continuum'``: entire range (line masking applied later in spectra.restrict)
+        - ``'continuum'``: entire range (line masking applied later)
     pad : u.Quantity, optional
-        Velocity half-width for ``'lines'`` mode
+        Velocity half-width for ``'lines'`` mode.
 
     Returns
     -------
-    (jnp.ndarray, jnp.ndarray)
-        Fitting regions (N, 2) and continuum height guesses (N,)
+    jnp.ndarray
+        Fitting regions (N, 2).
     """
     mode = defaults.FittingMode(mode)
 
     if mode == defaults.FittingMode.LINES:
-        fit_regs = _line_regions(config, spectra, pad=pad)
+        return _line_regions(config, spectra, pad=pad)
     elif mode in (defaults.FittingMode.FULL, defaults.FittingMode.CONTINUUM):
-        fit_regs = _full_region(spectra)
+        return _full_region(spectra)
     else:
         raise ValueError(f'Unknown fitting mode: {mode}')
-
-    cont_guesses = continuumHeightGuesses(fit_regs, config, spectra)
-    return fit_regs, cont_guesses
 
 
 def computeContinuumRegions(
     config: dict, spectra: Spectra, pad: u.Quantity = None
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> jnp.ndarray:
     """Compute continuum regions around emission lines (backward-compatible wrapper).
 
     See :func:`compute_fit_regions` for the general interface.
@@ -255,80 +252,65 @@ def computeContinuumRegions(
 
 
 def continuumHeightGuesses(
-    continuum_regions: jnp.ndarray,
-    config: list,
+    fit_regions: jnp.ndarray,
     spectra: Spectra,
-    linepad: u.Quantity = None,
     sigma: float = 0,
 ) -> jnp.ndarray:
-    """
-    Guess the continuum height for different
+    """Guess the continuum height in each fitting region.
+
+    Uses ``spectrum.line_mask`` (must be pre-computed via
+    :meth:`~unite.spectra.Spectrum.compute_line_mask`).
 
     Parameters
     ----------
+    fit_regions : jnp.ndarray
+        Fitting regions (N, 2).
     spectra : Spectra
-        Spectra
-    continuum_regions : list
-        List of continuum regions
-    config : dict
-        Configuration of emission lines
-    linepad : u.Quantity, optional
-        Padding to mask line
+        Spectra with ``line_mask`` already set.
     sigma : float, optional
-
+        Upper-bound offset in units of error.
 
     Returns
     -------
     jnp.ndarray
-        Array of continuum height guesses
+        Continuum height guesses (N,).
     """
-    if linepad is None:
-        linepad = defaults.LINEPAD
-
-    # Return the updated config
     return jnp.array(
         [
             max(
                 [
-                    continuumHeightGuess(config, continuum_regions, spectrum, linepad, sigma)
+                    continuumHeightGuess(region, spectrum, sigma)
                     for spectrum in spectra.spectra
                 ]
             )
-            for continuum_regions in continuum_regions
+            for region in fit_regions
         ]
     )
 
 
-# Continuum Height Guess
 def continuumHeightGuess(
-    config: dict, continuum_region: jnp.ndarray, spectrum: Spectrum, linepad: u.Quantity, sigma: float
+    continuum_region: jnp.ndarray, spectrum: Spectrum, sigma: float
 ) -> jnp.ndarray:
-    """
-    Guess the continuum height for a spectrum
+    """Guess the continuum height for a spectrum in one region.
 
     Parameters
     ----------
     continuum_region : jnp.ndarray
-        Boundary of the continuum region
-    config : dict
-        Configuration of emission lines
-    linepad : u.Quantity
-        Padding to mask line
+        Boundary of the continuum region [lo, hi].
+    spectrum : Spectrum
+        Spectrum with ``line_mask`` attribute.
     sigma : float
-        Upper bound for median calculation
+        Upper-bound offset in units of error.
 
     Returns
     -------
     float
-        Continuum Height Estimate
+        Continuum height estimate.
     """
-
-    # Mask the lines
-    mask = spectrum.maskLines(config, continuum_region, linepad)
+    mask = spectrum.coverage(continuum_region[0], continuum_region[1]) & spectrum.line_mask
 
     # If no coverage, return very large guess, but negative so it can be overwritten by other disperser.
     if mask.sum() == 0:
         return -jnp.abs(spectrum.flux + sigma * spectrum.err).max()
 
-    # Compute the median Nsigma upper bound
     return jnp.median(spectrum.flux[mask] + sigma * spectrum.err[mask])

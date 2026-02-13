@@ -244,36 +244,31 @@ def masklines(
     region: np.ndarray,
     broad_mask: u.Quantity = 3000 * u.km / u.s,
     narrow_mask: u.Quantity = 300 * u.km / u.s,
-    broad_species: list = ['HI'],
     wave_unit: u.Unit = u.micron,
 ) -> np.ndarray:
-    """
-    Create a mask for emission lines
+    """Create a mask for emission lines.
+
+    Uses config ``LineType`` to choose padding (no ``broad_species`` filter).
 
     Parameters
     ----------
-    wave : np.ndarray
-        Wavelength array
-    redshift : float
-        Redshift of the source
     config : dict
-        Configuration of emission lines
+        Configuration of emission lines.
+    spectra : Spectrum
+        Spectrum object.
     region : np.ndarray
-        Boundary of the continuum region [min, max]
+        Boundary of the continuum region [min, max].
     broad_mask : u.Quantity
-        Masking width for broad lines (velocity). Default 5000 km/s.
+        Masking width for broad lines (velocity).
     narrow_mask : u.Quantity
-        Masking width for narrow lines (velocity)
-    broad_species : list, optional
-        List of species to consider as broad. If None, all 'broad' lines are masked with broad_mask.
-        If provided, only 'broad' lines of these species are masked with broad_mask.
+        Masking width for narrow lines (velocity).
     wave_unit : u.Unit, optional
-        Unit of the wavelength array, defaults to micron
+        Unit of the wavelength array, defaults to micron.
 
     Returns
     -------
     np.ndarray
-        Boolean mask (True = Continuum, False = Line)
+        Boolean mask (True = Continuum, False = Line).
     """
     redshift = spectra.redshift_initial
     wave = spectra.wavelength.to(wave_unit).value
@@ -292,28 +287,15 @@ def masklines(
     # Mask each line
     λ_unit_config = u.Unit(config['Unit'])
 
+    _NARROW_TYPES = {'narrow', 'emission', 'absorption'}
     for group in config['Groups'].values():
         for species in group['Species']:
-            # Determine line type
             line_type = species.get('LineType', 'narrow')
-            is_broad = line_type == 'broad'
-
-            # Filter by species if list provided
-            if is_broad and (broad_species is not None):
-                if species['Name'] not in broad_species:
-                    is_broad = False
-
-            # Select padding
-            pad = pad_broad if is_broad else pad_narrow
+            pad = pad_narrow if line_type in _NARROW_TYPES else pad_broad
 
             for line in species['Lines']:
-                # Compute line wavelength in observed frame
                 linewav = (line['Wavelength'] * λ_unit_config).to(wave_unit).value * opz
-
-                # Effective padding width
                 width = linewav * pad
-
-                # Mask
                 l, h = linewav - width, linewav + width
                 linemask = np.logical_and(l < wave, wave < h)
                 mask = np.logical_and(mask, np.invert(linemask))
