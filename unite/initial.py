@@ -204,6 +204,50 @@ def _full_region(spectra: Spectra) -> jnp.ndarray:
     return jnp.array([[lo, hi]])
 
 
+def _clip_to_region(
+    fit_regs: jnp.ndarray, config: dict, spectra: Spectra
+) -> jnp.ndarray:
+    """Clip fit regions to the config ``Region`` window.
+
+    Parameters
+    ----------
+    fit_regs : jnp.ndarray
+        Fitting regions (N, 2) in observed-frame.
+    config : dict
+        Configuration with ``Region`` key ([lo, hi] in config ``Unit``, rest-frame).
+    spectra : Spectra
+        Spectra (used for unit conversion and redshift).
+
+    Returns
+    -------
+    jnp.ndarray
+        Clipped fitting regions (M, 2), M <= N.
+
+    Raises
+    ------
+    ValueError
+        If all regions fall outside the window.
+    """
+    # Convert rest-frame config region to observed-frame
+    region = u.Quantity(config['Region'], config['Unit']).to(spectra.λ_unit).value
+    region = region * (1 + spectra.redshift_initial)
+
+    # Clip each region to the window, keep only overlapping ones
+    clipped = []
+    for reg in fit_regs:
+        lo = max(float(reg[0]), region[0])
+        hi = min(float(reg[1]), region[1])
+        if lo < hi:
+            clipped.append([lo, hi])
+
+    if not clipped:
+        raise ValueError(
+            f"All fit regions fall outside config Region {config['Region']} {config['Unit']}"
+        )
+
+    return jnp.array(clipped)
+
+
 def compute_fit_regions(
     config: dict,
     spectra: Spectra,
@@ -234,11 +278,16 @@ def compute_fit_regions(
     mode = defaults.FittingMode(mode)
 
     if mode == defaults.FittingMode.LINES:
-        return _line_regions(config, spectra, pad=pad)
+        fit_regs = _line_regions(config, spectra, pad=pad)
     elif mode in (defaults.FittingMode.FULL, defaults.FittingMode.CONTINUUM):
-        return _full_region(spectra)
+        fit_regs = _full_region(spectra)
     else:
         raise ValueError(f'Unknown fitting mode: {mode}')
+
+    if 'Region' in config:
+        fit_regs = _clip_to_region(fit_regs, config, spectra)
+
+    return fit_regs
 
 
 def computeContinuumRegions(

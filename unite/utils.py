@@ -38,9 +38,9 @@ def restrictConfig(config: dict, spectra: Spectra, linedet: u.Quantity = default
         Updated configuration
     """
     # Parse config['Region'] if it exists
-    # if 'Region' in config:
-    #     config_region = u.Quantity(config['Region'], config['Unit']).to(spectra.λ_unit).value
-    #     config_region = config_region * (1 + spectra.redshift_initial)
+    if 'Region' in config:
+        config_region = u.Quantity(config['Region'], config['Unit']).to(spectra.λ_unit).value
+        config_region = config_region * (1 + spectra.redshift_initial)
 
     # Set the default linetype as narrow
     for group in config['Groups'].values():
@@ -105,10 +105,10 @@ def restrictConfig(config: dict, spectra: Spectra, linedet: u.Quantity = default
 
                 # Check coverage
                 if jnp.logical_or.reduce(jnp.array([s.coverage(low, high).any() for s in spectra.spectra])):
-                    # dont add lines outside config region
-                    # if 'Region' in config:
-                    #     if (low < config_region[0]) | (high > config_region[1]):
-                    #         continue
+                    # Don't add lines outside config region
+                    if 'Region' in config:
+                        if (low < config_region[0]) or (high > config_region[1]):
+                            continue
                     new_lines.append(line)
 
             # Add species only if it has remaining lines
