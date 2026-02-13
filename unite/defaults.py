@@ -24,7 +24,7 @@ class FittingMode(str, Enum):
 
 # Constants used for line detection, line padding, and continuum regions
 LINEDETECT: u.Quantity = 1_000 * (u.km / u.s)
-LINEPAD: u.Quantity = 3_500 * (u.km / u.s)
+LINEPAD: u.Quantity = 5_000 * (u.km / u.s)
 CONTINUUM: u.Quantity = 10_000 * (u.km / u.s)
 
 # Dictionary that defines mapping from integers to line types
