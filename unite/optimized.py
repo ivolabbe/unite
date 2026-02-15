@@ -8,6 +8,7 @@ from typing import Final
 # JAX packages
 from jax.scipy.special import erf, erfc
 from jax import config, jit, vmap, lax, numpy as jnp, nn
+from functools import partial
 
 # Conversion factor from FWHM to sigma for variance = 1/2
 # σ = fwhm / ( 2 * sqrt( 2 * ln(2) ) )
@@ -459,6 +460,59 @@ def linearContinuaNorm(
     )
 
 
+def _chebval(x: jnp.ndarray, coeffs: list) -> jnp.ndarray:
+    """Clenshaw recurrence for Chebyshev series. Replaces orthax.chebyshev.chebval."""
+    n = len(coeffs)
+    if n == 1:
+        return coeffs[0] + jnp.zeros_like(x)
+    if n == 2:
+        return coeffs[0] + coeffs[1] * x
+    x2 = 2 * x
+    c0, c1 = coeffs[-2], coeffs[-1]
+    for k in range(3, n + 1):
+        c0, c1 = coeffs[-k] - c1, c0 + c1 * x2
+    return c0 + c1 * x
+
+
+@jit
+def chebyshevContinua(
+    λ: jnp.ndarray,
+    coeffs: list,
+    continuum_regions: jnp.ndarray,
+) -> jnp.ndarray:
+    """Piecewise Chebyshev continuum of arbitrary order.
+
+    Evaluates a Chebyshev series on coordinates normalized to [-1, 1]
+    within each region.
+
+    Parameters
+    ----------
+    λ : jnp.ndarray
+        Wavelength values (any frame).
+    coeffs : list of jnp.ndarray
+        Chebyshev coefficients ``[c0, c1, ..., cN]``, each shape ``(N_regions,)``.
+    continuum_regions : jnp.ndarray
+        Region bounds, shape ``(N_regions, 2)``.
+
+    Returns
+    -------
+    jnp.ndarray
+        Flux values, shape ``(len(λ), N_regions)``.
+    """
+    cont_centers = continuum_regions.mean(axis=1)
+    cont_deltas = continuum_regions[:, 1] - continuum_regions[:, 0]
+
+    λ = λ[:, jnp.newaxis]
+    x = 2 * (λ - cont_centers) / cont_deltas  # normalized to [-1, 1]
+    continuum = _chebval(x, coeffs)
+
+    return jnp.where(
+        jnp.logical_and(continuum_regions[:, 0] < λ, λ < continuum_regions[:, 1]),
+        continuum,
+        0.0,
+    )
+
+
 @jit
 def powerLawContinuum(λ: jnp.ndarray, λ0: float, a: float, β: float) -> jnp.ndarray:
     """
@@ -575,3 +629,127 @@ def planck_function(
 
     # Clip final result to prevent overflow
     return jnp.exp(jnp.clip(log_wavelength_ratio + log_expm1_diff, -100.0, 100.0))
+
+
+# --- B-spline continuum ---
+
+
+def _bspline_basis(t: jnp.ndarray, knots: jnp.ndarray, degree: int) -> jnp.ndarray:
+    """Compute B-spline basis matrix via iterative Cox-de Boor.
+
+    The Python for-loop over ``degree`` is unrolled at JAX trace time
+    (degree is a concrete int, not a traced value).
+
+    Parameters
+    ----------
+    t : jnp.ndarray
+        Evaluation points, shape ``(N,)``.
+    knots : jnp.ndarray
+        Knot vector (clamped), shape ``(M,)``.
+    degree : int
+        Spline degree (e.g. 3 for cubic).
+
+    Returns
+    -------
+    jnp.ndarray
+        Basis matrix, shape ``(N, n_basis)`` where ``n_basis = M - degree - 1``.
+    """
+    M = len(knots)
+    # Clamp right endpoint inward by epsilon so half-open [t_i, t_{i+1})
+    # intervals naturally include it in the last non-degenerate span
+    t_safe = jnp.where(t >= knots[-1], knots[-1] * (1 - 1e-14), t)
+
+    # Degree-0 basis: indicator functions, shape (N, M-1)
+    B = jnp.where(
+        (t_safe[:, None] >= knots[None, :-1]) & (t_safe[:, None] < knots[None, 1:]),
+        1.0, 0.0,
+    )
+
+    for d in range(1, degree + 1):
+        n_basis = M - d - 1
+        left_denom = knots[d:d + n_basis] - knots[:n_basis]
+        right_denom = knots[d + 1:d + 1 + n_basis] - knots[1:1 + n_basis]
+
+        # Safe denominators: avoid division by zero in jnp.where branches
+        # (JAX evaluates both branches during differentiation)
+        safe_left = jnp.where(left_denom > 0, left_denom, 1.0)
+        safe_right = jnp.where(right_denom > 0, right_denom, 1.0)
+
+        left_w = jnp.where(left_denom > 0,
+                           (t[:, None] - knots[None, :n_basis]) / safe_left[None, :],
+                           0.0)
+        right_w = jnp.where(right_denom > 0,
+                            (knots[None, d + 1:d + 1 + n_basis] - t[:, None]) / safe_right[None, :],
+                            0.0)
+        B = left_w * B[:, :n_basis] + right_w * B[:, 1:n_basis + 1]
+
+    return B
+
+
+@partial(jit, static_argnums=(3,))
+def bsplineContinuum(
+    λ: jnp.ndarray,
+    coeffs: jnp.ndarray,
+    knots: jnp.ndarray,
+    degree: int,
+) -> jnp.ndarray:
+    """Evaluate B-spline continuum.
+
+    Parameters
+    ----------
+    λ : jnp.ndarray
+        Wavelength values, shape ``(N,)``.
+    coeffs : jnp.ndarray
+        B-spline coefficients, shape ``(n_basis,)``.
+    knots : jnp.ndarray
+        Clamped knot vector.
+    degree : int
+        Spline degree (static).
+
+    Returns
+    -------
+    jnp.ndarray
+        Continuum flux, shape ``(N,)``.
+    """
+    B = _bspline_basis(λ, knots, degree)
+    return B @ coeffs
+
+
+# --- Bernstein polynomial continuum ---
+
+
+@jit
+def bernsteinContinuum(
+    λ: jnp.ndarray,
+    coeffs: jnp.ndarray,
+    λ_min: float,
+    λ_max: float,
+    binom_coeffs: jnp.ndarray,
+) -> jnp.ndarray:
+    """Evaluate Bernstein polynomial continuum.
+
+    Bernstein basis polynomials are non-negative, so positive coefficients
+    guarantee a positive continuum.
+
+    Parameters
+    ----------
+    λ : jnp.ndarray
+        Wavelength values, shape ``(N,)``.
+    coeffs : jnp.ndarray
+        Bernstein coefficients, shape ``(n+1,)``.
+    λ_min, λ_max : float
+        Wavelength range for normalization.
+    binom_coeffs : jnp.ndarray
+        Pre-computed binomial coefficients ``C(n, i)``, shape ``(n+1,)``.
+
+    Returns
+    -------
+    jnp.ndarray
+        Continuum flux, shape ``(N,)``.
+    """
+    n = len(coeffs) - 1
+    t = jnp.clip((λ - λ_min) / (λ_max - λ_min), 0.0, 1.0)
+    i = jnp.arange(n + 1)
+    # Basis: C(n,i) * t^i * (1-t)^(n-i), shape (N, n+1)
+    basis = binom_coeffs * (t[:, None] ** i[None, :]) * ((1 - t[:, None]) ** (n - i)[None, :])
+    return basis @ coeffs

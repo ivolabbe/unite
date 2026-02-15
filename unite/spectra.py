@@ -158,8 +158,10 @@ class NIRSpecSpectra(Spectra):
         if len(bestrow) > 1:
             bestrow = bestrow[bestrow['grating'] == 'G395M']
 
-        # If z isn't -1 else use fitz
-        if bestrow['z'] == -1:
+        # Get redshift: prefer z_best, fall back to z, then zfit
+        if 'z_best' in bestrow.colnames:
+            redshift_initial = bestrow['z_best'][0]
+        elif bestrow['z'] == -1:
             redshift_initial = bestrow['zfit'][0]
         else:
             redshift_initial = bestrow['z'][0]
@@ -334,8 +336,10 @@ class Spectrum:
     def compute_line_mask(self, config: dict) -> None:
         """Compute a boolean mask over full arrays flagging line-contaminated pixels.
 
-        Uses config ``LineType`` to choose padding:
-        ``'broad'`` → ``defaults.LINEPAD``, all others → ``defaults.LINEDETECT``.
+        Uses ``defaults.LINEDETECT`` for narrow types and ``defaults.LINEPAD``
+        for broad types, but always at least the local instrumental FWHM
+        (estimated from pixel spacing), capped at ``defaults.LINEPAD``.
+
         Stores result as ``self.line_mask`` (True = continuum, False = line).
 
         Parameters
@@ -348,14 +352,24 @@ class Spectrum:
         pad_narrow = (defaults.LINEDETECT / consts.c).to(u.dimensionless_unscaled).value
         λ_unit = u.Unit(config['Unit'])
 
+        # Local FWHM estimate: 2 × pixel spacing (Nyquist) as fractional Δλ/λ
+        dw = np.diff(self.wave)
+        # Pad to same length as wave (repeat last value)
+        dw = np.append(dw, dw[-1])
+        local_fwhm_frac = 2 * dw / self.wave  # dimensionless Δv/c
+
         _NARROW_TYPES = {'narrow', 'emission', 'absorption'}
         mask = np.ones(len(self.wave), dtype=bool)
         for group in config['Groups'].values():
             for species in group['Species']:
                 line_type = species.get('LineType', 'narrow')
-                pad = pad_narrow if line_type in _NARROW_TYPES else pad_broad
+                base_pad = pad_narrow if line_type in _NARROW_TYPES else pad_broad
                 for line in species['Lines']:
                     linewav = (line['Wavelength'] * λ_unit).to(self.λ_unit).value * opz
+                    # Resolution-aware: use max(base_pad, min(LINEPAD, local_FWHM))
+                    idx = np.searchsorted(self.wave, linewav).clip(0, len(self.wave) - 1)
+                    fwhm_pad = min(pad_broad, local_fwhm_frac[idx])
+                    pad = max(base_pad, fwhm_pad)
                     hw = linewav * pad
                     linemask = np.logical_and(linewav - hw < self.wave, self.wave < linewav + hw)
                     mask &= ~linemask

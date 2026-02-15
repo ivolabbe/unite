@@ -245,6 +245,25 @@ def temperature_prior(low: float = 1000.0, high: float = 30000.0) -> dist.Distri
     return dist.Uniform(low=low, high=high)
 
 
+def chebyshev_prior(offset_guess: jnp.ndarray) -> dist.Distribution:
+    """Uniform prior for Chebyshev curvature coefficient (c2).
+
+    Scale is set relative to the continuum height guess — curvature
+    that doubles the flux is already extreme.
+
+    Parameters
+    ----------
+    offset_guess : jnp.ndarray
+        Continuum height guess (sets the scale).
+
+    Returns
+    -------
+    dist.Distribution
+    """
+    scale = jnp.abs(offset_guess)
+    return dist.Uniform(low=-scale, high=scale)
+
+
 def amplitude_prior(guess: float) -> dist.Distribution:
     """
     Return a lognormal prior for continuum amplitude
@@ -261,4 +280,35 @@ def amplitude_prior(guess: float) -> dist.Distribution:
     """
     # Use log-normal prior centered on the guess with scale=1.0
     # Ensures amplitude stays positive
+    return dist.LogNormal(loc=jnp.log(jnp.maximum(guess, 0.01)), scale=1.0)
+
+
+def bspline_coeff_prior(guess: jnp.ndarray) -> dist.Distribution:
+    """Uniform prior for B-spline coefficients, centered on LS guess.
+
+    Parameters
+    ----------
+    guess : jnp.ndarray
+        Initial coefficient guess from weighted least squares.
+
+    Returns
+    -------
+    dist.Distribution
+    """
+    scale = jnp.maximum(jnp.abs(guess), 0.01)
+    return dist.Uniform(low=guess - 2 * scale, high=guess + 2 * scale)
+
+
+def bernstein_coeff_prior(guess: jnp.ndarray) -> dist.Distribution:
+    """LogNormal prior for Bernstein coefficients (positive).
+
+    Parameters
+    ----------
+    guess : jnp.ndarray
+        Initial coefficient guess from NNLS.
+
+    Returns
+    -------
+    dist.Distribution
+    """
     return dist.LogNormal(loc=jnp.log(jnp.maximum(guess, 0.01)), scale=1.0)

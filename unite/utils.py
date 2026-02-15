@@ -148,7 +148,8 @@ def validateConfig(config: dict) -> None:
 
 import os
 from pathlib import Path
-from astropy.utils.data import download_file
+import pandas as pd
+from astropy.utils.data import download_file, is_url_in_cache
 from astropy.table import Table
 
 
@@ -157,8 +158,7 @@ def download_spectra(
     table_csv: str | None = None,
     #    default_url_prefix: str = "https://zenodo.org/records/15472354/files/",
     default_url_prefix: str = "https://s3.amazonaws.com/msaexp-nirspec/extractions",
-    # Updated 19 Jan 2026
-    version: str = "v4.5",
+    version: str = "v4.4",
     spectra_directory: str | None = None,
 ) -> Table:
     """
@@ -204,10 +204,18 @@ def download_spectra(
 
     p = Path(table_csv)
     if p.exists():
-        tab = Table.read(str(p), format='csv')
+        print('Loading spectra table (local):', table_csv)
+        tab = Table.from_pandas(pd.read_csv(str(p), low_memory=False))
     else:
-        print('Downloading spectra csv table:', table_csv)
-        tab = Table.read(download_file(table_csv, cache=True), format='csv')
+        if is_url_in_cache(table_csv):
+            print('Loading spectra table (cached)')
+        else:
+            print('Downloading spectra table:', table_csv)
+        compression = 'gzip' if table_csv.endswith('.gz') else None
+        tab = Table.from_pandas(pd.read_csv(
+            download_file(table_csv, cache=True),
+            low_memory=False, compression=compression,
+        ))
 
     # Ensure target directory exists
     Path(normalized_paths[0]).parent.mkdir(parents=True, exist_ok=True)

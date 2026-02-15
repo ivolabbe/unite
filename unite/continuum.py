@@ -3,6 +3,7 @@ Continuum models for spectral fitting.
 
 Provides continuum model classes for different continuum types:
 - LinearContinuum: piecewise linear (default, existing behavior)
+- ChebyshevContinuum: piecewise 2nd-order Chebyshev polynomial
 - BlackbodyContinuum: pure Planck blackbody
 - ModifiedBlackbodyContinuum: A * B_λ(T) * (λ/λ₀)^β
 - AttenuatedBlackbodyContinuum: A * B_λ(T) * exp(-τ_V * [(λ/λ_V)^α − (pivot/λ_V)^α])
@@ -15,6 +16,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, Tuple
 
 import numpy as np
+from scipy.optimize import nnls
+from scipy.special import comb
 import jax.numpy as jnp
 import numpyro.distributions as dist
 
@@ -146,6 +149,54 @@ class LinearContinuum(ContinuumModel):
             params['cont_offset'],
             fit_regions,
         ).sum(1)
+
+
+class ChebyshevContinuum(ContinuumModel):
+    """Piecewise Chebyshev continuum model of configurable order.
+
+    Generalizes LinearContinuum with Chebyshev polynomials per fitting
+    region.  c0 is the mean level, c1 the linear tilt, and higher
+    terms add curvature.
+
+    Parameters
+    ----------
+    order : int
+        Polynomial order (number of coefficients = order + 1). Default 2.
+    """
+
+    def __init__(self, order: int = 2):
+        self.order = order
+
+    def initialize(self, spectra: Spectra, cont_guesses: jnp.ndarray) -> None:
+        self.cont_guesses = cont_guesses
+
+    def sample_params(self, sample_fn, fit_regions: jnp.ndarray) -> Dict[str, jnp.ndarray]:
+        """Sample Chebyshev coefficients per region."""
+        from numpyro import plate
+
+        Nc = len(fit_regions)
+        params = {}
+        with plate(f'Nc = {Nc}', Nc):
+            # c0 = mean level, c1 = linear tilt, c2+ = curvature
+            params['cheb_c0'] = sample_fn('cheb_c0', priors.height_prior(self.cont_guesses))
+            if self.order >= 1:
+                params['cheb_c1'] = sample_fn('cheb_c1', priors.tilt_prior(self.cont_guesses))
+            for k in range(2, self.order + 1):
+                params[f'cheb_c{k}'] = sample_fn(
+                    f'cheb_c{k}', priors.chebyshev_prior(self.cont_guesses),
+                )
+
+        return params
+
+    def evaluate(
+        self,
+        wave: jnp.ndarray,
+        params: Dict[str, jnp.ndarray],
+        fit_regions: jnp.ndarray,
+    ) -> jnp.ndarray:
+        """Evaluate piecewise Chebyshev continuum."""
+        coeffs = [params[f'cheb_c{k}'] for k in range(self.order + 1)]
+        return optimized.chebyshevContinua(wave, coeffs, fit_regions).sum(1)
 
 
 class BlackbodyContinuum(ContinuumModel):
@@ -358,6 +409,123 @@ class AttenuatedBlackbodyContinuum(ContinuumModel):
         return params['bb_amplitude'] * planck * extinction
 
 
+class BSplineContinuum(ContinuumModel):
+    """Global B-spline continuum with local knot control.
+
+    Parameters
+    ----------
+    n_knots : int
+        Number of internal knots (total basis functions = n_knots + degree + 1).
+    degree : int
+        Spline degree (3 = cubic).
+    """
+
+    def __init__(self, n_knots: int = 5, degree: int = 3):
+        self.n_knots = n_knots
+        self.degree = degree
+        self.n_basis = n_knots + degree + 1
+
+    def initialize(self, spectra: Spectra, cont_guesses: jnp.ndarray) -> None:
+        wave, flux, err = self._extract_data(spectra)
+        λ_min, λ_max = float(wave.min()), float(wave.max())
+
+        # Clamped knot vector: [λ_min]*(d+1) + internal + [λ_max]*(d+1)
+        internal = np.linspace(λ_min, λ_max, self.n_knots + 2)[1:-1]
+        self.knots = jnp.array(np.concatenate([
+            np.full(self.degree + 1, λ_min),
+            internal,
+            np.full(self.degree + 1, λ_max),
+        ]))
+
+        # Build basis at data wavelengths (NumPy, for init only)
+        B = np.array(optimized._bspline_basis(jnp.array(wave), self.knots, self.degree))
+        # Weighted least squares for initial coefficients
+        W = 1.0 / err
+        Bw = B * W[:, None]
+        fw = flux * W
+        coeff_guess, _, _, _ = np.linalg.lstsq(Bw, fw, rcond=None)
+
+        self.coeff_guess = jnp.array(coeff_guess)
+        self.init_params = {'bsp_coeff': self.coeff_guess}
+        log.info(f"B-spline init: {self.n_basis} basis, degree {self.degree}")
+
+    def sample_params(self, sample_fn, fit_regions: jnp.ndarray) -> dict:
+        from numpyro import plate
+
+        with plate(f'n_bsp = {self.n_basis}', self.n_basis):
+            coeffs = sample_fn('bsp_coeff', priors.bspline_coeff_prior(self.coeff_guess))
+        return {'bsp_coeffs': coeffs}
+
+    def evaluate(
+        self,
+        wave_rest: jnp.ndarray,
+        params: dict,
+        fit_regions: jnp.ndarray,
+    ) -> jnp.ndarray:
+        return optimized.bsplineContinuum(
+            wave_rest, params['bsp_coeffs'], self.knots, self.degree,
+        )
+
+
+class BernsteinContinuum(ContinuumModel):
+    """Global Bernstein polynomial continuum with positivity guarantee.
+
+    Bernstein basis polynomials are non-negative, so positive coefficients
+    guarantee a positive continuum.
+
+    Parameters
+    ----------
+    degree : int
+        Polynomial degree (number of coefficients = degree + 1).
+    """
+
+    def __init__(self, degree: int = 4):
+        self.degree = degree
+        self.n_basis = degree + 1
+
+    def initialize(self, spectra: Spectra, cont_guesses: jnp.ndarray) -> None:
+        wave, flux, err = self._extract_data(spectra)
+        self.λ_min = float(wave.min())
+        self.λ_max = float(wave.max())
+
+        # Pre-compute binomial coefficients C(n, i)
+        n = self.degree
+        self.binom_coeffs = jnp.array([comb(n, i, exact=True) for i in range(n + 1)],
+                                      dtype=jnp.float64 if hasattr(jnp, 'float64') else float)
+
+        # Build Bernstein basis at data wavelengths
+        t = np.clip((wave - self.λ_min) / (self.λ_max - self.λ_min), 0.0, 1.0)
+        i_arr = np.arange(n + 1)
+        bc = np.array(self.binom_coeffs)
+        basis = bc * (t[:, None] ** i_arr[None, :]) * ((1 - t[:, None]) ** (n - i_arr)[None, :])
+
+        # NNLS for positive initial coefficients
+        coeff_guess, _ = nnls(basis / err[:, None], flux / err)
+        # Ensure no zeros (for LogNormal prior)
+        coeff_guess = np.maximum(coeff_guess, 0.01)
+
+        self.coeff_guess = jnp.array(coeff_guess)
+        self.init_params = {'bern_coeff': self.coeff_guess}
+        log.info(f"Bernstein init: degree {self.degree}")
+
+    def sample_params(self, sample_fn, fit_regions: jnp.ndarray) -> dict:
+        from numpyro import plate
+
+        with plate(f'n_bern = {self.n_basis}', self.n_basis):
+            coeffs = sample_fn('bern_coeff', priors.bernstein_coeff_prior(self.coeff_guess))
+        return {'bern_coeffs': coeffs}
+
+    def evaluate(
+        self,
+        wave_rest: jnp.ndarray,
+        params: dict,
+        fit_regions: jnp.ndarray,
+    ) -> jnp.ndarray:
+        return optimized.bernsteinContinuum(
+            wave_rest, params['bern_coeffs'], self.λ_min, self.λ_max, self.binom_coeffs,
+        )
+
+
 def parse_continuum_config(config: dict) -> ContinuumModel:
     """Create a ContinuumModel from config (no data needed).
 
@@ -383,6 +551,9 @@ def parse_continuum_config(config: dict) -> ContinuumModel:
     if cont_type == 'linear':
         return LinearContinuum()
 
+    elif cont_type == 'chebyshev':
+        return ChebyshevContinuum(order=cont_cfg.get('order', 2))
+
     elif cont_type == 'blackbody':
         return BlackbodyContinuum(
             temp_bounds=cont_cfg.get('temperature', None),
@@ -401,6 +572,15 @@ def parse_continuum_config(config: dict) -> ContinuumModel:
             alpha_bounds=cont_cfg.get('alpha', (-2.0, 0.0)),
             lambda_v_micron=cont_cfg.get('lambda_v_micron', 0.55),
         )
+
+    elif cont_type == 'bspline':
+        return BSplineContinuum(
+            n_knots=cont_cfg.get('n_knots', 5),
+            degree=cont_cfg.get('degree', 3),
+        )
+
+    elif cont_type == 'bernstein':
+        return BernsteinContinuum(degree=cont_cfg.get('degree', 4))
 
     elif cont_type == 'none':
         return NoContinuum()

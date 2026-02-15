@@ -45,6 +45,33 @@ def get_ion_props(name: str) -> Tuple[str, str, Optional[str]]:
     return 'orange', label, None
 
 
+def _break_gaps(wave, *arrays, factor=3.0):
+    """Insert NaN at gaps in wave array so matplotlib breaks the line.
+
+    A gap is detected where the spacing exceeds ``factor`` times the median spacing.
+    Returns (wave, *arrays) with NaN rows inserted at gap positions.
+    """
+    if len(wave) < 2:
+        return (wave, *arrays)
+    dw = np.diff(wave)
+    median_dw = np.median(dw)
+    if median_dw <= 0:
+        return (wave, *arrays)
+    gap_idx = np.where(dw > factor * median_dw)[0] + 1  # indices after each gap
+    if len(gap_idx) == 0:
+        return (wave, *arrays)
+    wave_out = np.insert(wave.astype(float), gap_idx, np.nan)
+    out = [wave_out]
+    for arr in arrays:
+        if arr.ndim == 1:
+            out.append(np.insert(arr.astype(float), gap_idx, np.nan))
+        else:
+            # 2-D (e.g. model_samples): insert NaN row along axis=1
+            nan_row = np.full((arr.shape[0], len(gap_idx)), np.nan)
+            out.append(np.insert(arr.astype(float), gap_idx, np.nan, axis=1))
+    return tuple(out)
+
+
 def plotRegion(
     ax: pyplot.Axes,
     wave: jnp.ndarray,
@@ -60,6 +87,7 @@ def plotRegion(
     show_ylabel: bool = True,
     show_xlabel: bool = False,
     show_rest_labels: bool = True,
+    show_rest_xlabel: bool = True,
     resid_ax: pyplot.Axes | None = None,
     config: dict | None = None,
     components: dict | None = None,
@@ -72,22 +100,27 @@ def plotRegion(
 
     mask = jnp.logical_and(wave > region[0], wave < region[1])
 
-    ax.plot(wave[mask], flux[mask], color='k', ds='steps-mid')
+    # Break gaps for plotting (inserts NaN so matplotlib doesn't connect across gaps)
+    w_plot, f_plot, e_plot = _break_gaps(np.asarray(wave[mask]), np.asarray(flux[mask]), np.asarray(err[mask]))
+
+    ax.plot(w_plot, f_plot, color='k', ds='steps-mid')
     ax.errorbar(wave[mask], flux[mask], yerr=err[mask], fmt='none', color='k')
 
     # Check if model samples match the wave array
     m = None
     if model_samples.shape[1] == len(wave):
         for k in range(model_samples.shape[0]):
+            w_s, s_k = _break_gaps(np.asarray(wave[mask]), np.asarray(model_samples[k][mask]))
             ax.plot(
-                wave[mask],
-                model_samples[k][mask],
+                w_s,
+                s_k,
                 color='#E20134',
                 alpha=np.clip(5 / len(model_samples), 0.01, 1),
                 ds='steps-mid',
             )
         m = model_samples[best_model_idx]
-        ax.plot(wave[mask], m[mask], color='#A40122', alpha=1, lw=2, ds='steps-mid')
+        w_b, m_b = _break_gaps(np.asarray(wave[mask]), np.asarray(m[mask]))
+        ax.plot(w_b, m_b, color='#A40122', alpha=1, lw=2, ds='steps-mid')
     else:
         print(
             f"Warning: Model samples shape {model_samples.shape} does not match wave shape {wave.shape}. Skipping samples plot."
@@ -171,7 +204,8 @@ def plotRegion(
 
                 # Check visibility in mask
                 if jnp.max(s_flux[mask]) > 1e-10 or jnp.min(s_flux[mask]) < -1e-10:
-                    ax.plot(wave[mask], s_flux[mask], color=color, linestyle=linestyle, alpha=0.8, lw=1.5)
+                    w_c, f_c = _break_gaps(np.asarray(wave[mask]), np.asarray(s_flux[mask]))
+                    ax.plot(w_c, f_c, color=color, linestyle=linestyle, alpha=0.8, lw=1.5)
 
     # Optional scales
     if "yscale" in plot_kwargs:
@@ -191,7 +225,26 @@ def plotRegion(
         y_top = ax.get_ylim()[1] if len(plot_kwargs["ylim"]) == 1 else plot_kwargs["ylim"][1]
         ax.set_ylim(y_bottom, y_top)
     elif ax.get_yscale() in ['linear', 'symlog']:
-        ax.set_ylim(bottom=0)
+        # Auto-range from "good" pixels: error within a factor of 2 of median(error).
+        mask_np = np.asarray(mask)
+        flux_np = np.asarray(flux)
+        err_np = np.asarray(err)
+        valid = mask_np & np.isfinite(flux_np) & np.isfinite(err_np) & (err_np > 0)
+
+        if np.any(valid):
+            med_err = np.median(err_np[valid])
+            good = valid & (err_np >= 0.5 * med_err) & (err_np <= 2.0 * med_err)
+            if not np.any(good):
+                good = valid
+
+            y_bottom = float(np.min(flux_np[good]))
+            y_top = float(np.max(flux_np[good]))
+            if np.isfinite(y_bottom) and np.isfinite(y_top) and y_top > y_bottom:
+                ax.set_ylim(y_bottom, y_top)
+            else:
+                ax.set_ylim(bottom=0)
+        else:
+            ax.set_ylim(bottom=0)
 
     if show_ylabel:
         ax.set_ylabel(r'$f_\lambda$ [10$^{-20}$ erg s$^{-1}$ cm$^{-2}$ \AA$^{-1}$]')
@@ -210,7 +263,7 @@ def plotRegion(
     )
     if not show_rest_labels:
         rest_ax.set(xticklabels=[])
-    else:
+    if show_rest_labels and show_rest_xlabel:
         rest_ax.set_xlabel(r'$\lambda$ (Rest) [$\mu$m]')
 
     ax.tick_params(axis='x', which='both', top=False)
@@ -291,7 +344,8 @@ def plotRegion(
 
     if resid_ax is not None and m is not None:
         resid = (flux[mask] - m[mask]) / err[mask]
-        resid_ax.plot(wave[mask], resid, color='k', ds='steps-mid')
+        w_r, r_plot = _break_gaps(np.asarray(wave[mask]), np.asarray(resid))
+        resid_ax.plot(w_r, r_plot, color='k', ds='steps-mid')
         resid_ax.axhline(0, color='r', linestyle='--', alpha=0.5)
         resid_ax.set_ylabel(r'$\chi$')
         resid_ax.set_xlim(region)
@@ -322,7 +376,7 @@ def plotRegion(
         resid_ax.text(
             0.02,
             0.92,
-            f"$\chi^2$ = {chi2:.1f}{waic_str}",
+            rf"$\chi^2$ = {chi2:.1f}{waic_str}",
             transform=resid_ax.transAxes,
             va='top',
             ha='left',
@@ -454,6 +508,10 @@ def plotResults(
         for j in range(Nregs):
             cont_reg = fit_regions[j]
 
+            # Skip panel if spectrum doesn't cover this region
+            if not spectrum.coverage(float(cont_reg[0]), float(cont_reg[1])).any():
+                continue
+
             # Create inner grid for main plot + residual
             inner_grid = outer_grid[i, j].subgridspec(2, 1, height_ratios=[4, 1], hspace=0)
             ax = fig.add_subplot(inner_grid[0])
@@ -472,8 +530,9 @@ def plotResults(
                 spectrum_name=spectrum.name,
                 plot_kwargs=current_plot_kwargs,
                 show_ylabel=False,
-                show_xlabel=(i == Nspec - 1),
+                show_xlabel=False,
                 show_rest_labels=(i == 0),
+                show_rest_xlabel=False,
                 resid_ax=resid_ax,
                 config=config,
                 components=components.get(spectrum.name),
@@ -747,22 +806,27 @@ def plotFullSpectrum(
         model_samples = samples[f'{spectrum.name}_model']
         best_model = model_samples[best_model_idx]
 
+        # Break gaps for plotting
+        w_plot, f_plot, e_plot = _break_gaps(np.asarray(wave), np.asarray(flux), np.asarray(err))
+
         # Plot data
-        ax.plot(wave, flux, color='k', ds='steps-mid', label='Data' if spectrum == spectra.spectra[0] else None)
-        ax.fill_between(wave, flux - err, flux + err, alpha=0.2, color='gray', step='mid')
+        ax.plot(w_plot, f_plot, color='k', ds='steps-mid', label='Data' if spectrum == spectra.spectra[0] else None)
+        ax.fill_between(w_plot, f_plot - e_plot, f_plot + e_plot, alpha=0.2, color='gray', step='mid')
 
         # Plot model samples
         for k in range(model_samples.shape[0]):
+            w_s, s_k = _break_gaps(np.asarray(wave), np.asarray(model_samples[k]))
             ax.plot(
-                wave,
-                model_samples[k],
+                w_s,
+                s_k,
                 color='#E20134',
                 alpha=np.clip(5 / len(model_samples), 0.01, 0.3),
                 ds='steps-mid',
             )
 
         # Plot best fit
-        ax.plot(wave, best_model, color='#A40122', alpha=1, lw=1.5, ds='steps-mid',
+        w_b, bm = _break_gaps(np.asarray(wave), np.asarray(best_model))
+        ax.plot(w_b, bm, color='#A40122', alpha=1, lw=1.5, ds='steps-mid',
                 label='Model' if spectrum == spectra.spectra[0] else None)
 
     # Mark fitting regions

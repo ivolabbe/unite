@@ -11,7 +11,7 @@ dependencies = [
 "jaxns>=2.6.6,<3", 
 # added these while developing
 "pyneb>=1.1.28,<2",
-"splinex @ git+https://github.com/cornelius-braun/splinex.git", "chex>=0.1.90,<0.2", 
+"chex>=0.1.90,<0.2",
 "dotfit @ git+https://github.com/ivolabbe/dotfit.git@main"
 ]
 

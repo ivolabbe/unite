@@ -13,7 +13,7 @@ from jax import numpy as jnp
 from jax.experimental.sparse import BCOO
 
 # Bayesian Inference
-from numpyro import plate, sample, deterministic as determ, distributions as dist
+from numpyro import factor, plate, sample, deterministic as determ, distributions as dist
 
 # unite
 from unite.spectra import Spectra
@@ -270,6 +270,13 @@ def multiSpecModelV2(
 
         # Compute line fluxes
         fluxes = determ('flux_all', params['flux'] * line_estimates_eq)
+
+        # Flux regularization: only penalize lines sharing a wavelength (degenerate pairs)
+        flux_reg = getattr(continuum_model, 'flux_reg', 0.0)
+        if flux_reg > 0:
+            # Lines with >1 occurrence at same center wavelength
+            degen = jnp.sum(line_centers[:, None] == line_centers[None, :], axis=1) > 1
+            factor('flux_reg', -0.5 * jnp.sum(jnp.where(degen, params['flux']**2, 0.0)) / flux_reg**2)
 
         # Add initial redshift
         redshift = determ('redshift_all', params['redshift'] + spectra.redshift_initial)

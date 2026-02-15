@@ -1,0 +1,100 @@
+{
+    "Name": "cliff",
+    "Unit": "Angstrom",
+    "Groups": {
+        "absorption1": {
+            "TieRedshift": true,
+            "TieDispersion": true,
+            "Species": [
+                {
+                    "Name": "HI",
+                    "LineType": "absorption",
+                    "Lines": [
+                        {
+                            "Wavelength": 6564.632,
+                            "RelStrength": null
+                        }
+                    ]
+                }
+            ]
+        },
+        "exponential1": {
+            "TieRedshift": true,
+            "TieDispersion": true,
+            "Species": [
+                {
+                    "Name": "HI",
+                    "LineType": "exponential",
+                    "Lines": [
+                        {
+                            "Wavelength": 6564.632,
+                            "RelStrength": null
+                        },
+                        {
+                            "Wavelength": 10941.082,
+                            "RelStrength": null
+                        }
+                    ]
+                }
+            ]
+        },
+        "emission1": {
+            "TieRedshift": true,
+            "TieDispersion": true,
+            "Species": [
+                {
+                    "Name": "HI",
+                    "LineType": "emission",
+                    "Lines": [
+                        {
+                            "Wavelength": 6564.632,
+                            "RelStrength": null
+                        },
+                        {
+                            "Wavelength": 10941.082,
+                            "RelStrength": null
+                        },
+                        {
+                            "Wavelength": 10052.123,
+                            "RelStrength": null
+                        },
+                        {
+                            "Wavelength": 4862.691,
+                            "RelStrength": null
+                        }
+                    ]
+                },
+                {
+                    "Name": "[OIII]m1",
+                    "LineType": "emission",
+                    "Lines": [
+                        {
+                            "Wavelength": 4960.295,
+                            "RelStrength": 0.3351241241660222
+                        },
+                        {
+                            "Wavelength": 5008.24,
+                            "RelStrength": 1.0
+                        }
+                    ]
+                }
+            ]
+        },
+        "emission2": {
+            "TieRedshift": true,
+            "TieDispersion": true,
+            "Species": [
+                {
+                    "Name": "HeI",
+                    "LineType": "emission",
+                    "Lines": [
+                        {
+                            "Wavelength": 10833.306,
+                            "RelStrength": null
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
