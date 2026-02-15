@@ -2,7 +2,7 @@
 __pycache__/
 dist/
 
-.serena 
+#.serena 
 
 # pixi environments
 .pixi
@@ -10,3 +10,4 @@ dist/
 
 # Personal experiments / debugging
 scratch/
+.serena/
