@@ -93,7 +93,7 @@ The penalty is `factor('flux_reg', -0.5 * sum(flux_params^2) / flux_reg^2)` and 
 - **Line masking refactored** to compute once per spectrum and reuse
 - **WAIC** computed with numerically stable `logsumexp`
 - **Dynamic calibration export**: CSV includes all spectra (not hardcoded to PRISM)
-- **`orthax`/`splinex` removed**: Chebyshev evaluation uses internal Clenshaw recurrence; B-spline uses Cox-de Boor
+- **polynomials**: Chebyshev evaluation uses internal Clenshaw recurrence; B-spline uses Cox-de Boor
 - **Line types**: absorption, emission, narrow, broad, lorentzian, exponential, outflow
 - **FeII/FeI/TiII** absorption lines added from Kurucz
 - **Config defaults**: override `LINEPAD`, `LINEDETECT`, `CONTINUUM` from config
