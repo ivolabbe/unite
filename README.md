@@ -1,6 +1,6 @@
-# unite: Uniform NIRSpec Inference (Turbo) Engine
+# unite+
 
-### By Raphael Erik Hviding
+### based on unite by Raphael Erik Hviding
 
 Fast/efficient Bayesian inference of emission lines from multiple NIRSpec spectra simultaneously using [NumPyro](https://num.pyro.ai/).
 
