@@ -399,6 +399,15 @@ def NIRSpecModelArgs(
     # Apply config-specified default overrides (e.g. CONTINUUM, LINEPAD)
     defaults.apply_config_defaults(config)
 
+    # Register custom line type(s) from config
+    if 'Linetype' in config:
+        lt = config['Linetype']
+        entries = lt if isinstance(lt, list) else [lt]
+        for entry in entries:
+            defaults.register_linetype(
+                entry['name'], entry['flux'], entry['redshift'], entry['fwhm']
+            )
+
     # Restrict config to what we have coverage of
     config = utils.restrictConfig(config, spectra)
 

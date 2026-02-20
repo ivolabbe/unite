@@ -44,9 +44,42 @@ def configToMatrices(
     i_z, z_inds = 0, {}
     i_σ, σ_inds = 0, {}
 
+    # Track which z/σ index each group uses (for cross-group tying)
+    group_z_idx = {}  # group_name → z index used by that group
+    group_σ_idx = {}  # group_name → σ index used by that group
+
     # Iterate over groups, species, and lines
     linetypes = []
-    for group in config['Groups'].values():
+    for group_name, group in config['Groups'].items():
+        tie_z = group['TieRedshift']
+        tie_σ = group['TieDispersion']
+
+        # Cross-group tying: reuse target group's index
+        if isinstance(tie_z, str):
+            if tie_z not in group_z_idx:
+                raise ValueError(
+                    f"Group {group_name!r} ties redshift to {tie_z!r}, "
+                    f"but that group has not been defined yet. "
+                    f"The target group must appear before the referencing group."
+                )
+            local_iz = group_z_idx[tie_z]
+        else:
+            local_iz = i_z
+
+        if isinstance(tie_σ, str):
+            if tie_σ not in group_σ_idx:
+                raise ValueError(
+                    f"Group {group_name!r} ties dispersion to {tie_σ!r}, "
+                    f"but that group has not been defined yet. "
+                    f"The target group must appear before the referencing group."
+                )
+            local_iσ = group_σ_idx[tie_σ]
+        else:
+            local_iσ = i_σ
+
+        group_z_idx[group_name] = local_iz
+        group_σ_idx[group_name] = local_iσ
+
         for species in group['Species']:
             # Check if any fluxes in species are tied
             if not all([line['RelStrength'] is None for line in species['Lines']]):
@@ -59,8 +92,8 @@ def configToMatrices(
                 linetypes.append(species['LineType'])
 
                 # Keep track of nonzero matrix elements
-                z_inds[i] = i_z
-                σ_inds[i] = i_σ
+                z_inds[i] = local_iz
+                σ_inds[i] = local_iσ
 
                 # Associate line with it's total index
                 line['Index'] = i
@@ -77,16 +110,18 @@ def configToMatrices(
                 # Increment line index
                 i += 1
 
-            # If Group is not tied, increment
-            if not group['TieRedshift']:
+            # If Group is not tied, increment between species
+            if tie_z is False:
                 i_z += 1
-            if not group['TieDispersion']:
+                local_iz = i_z
+            if tie_σ is False:
                 i_σ += 1
+                local_iσ = i_σ
 
-        # Increment between groups if we didn't already and species is not empty
-        if group['Species']:
+        # Increment between groups if species is not empty and not cross-tied
+        if group['Species'] and not isinstance(tie_z, str):
             i_z += 1
-        if group['Species']:
+        if group['Species'] and not isinstance(tie_σ, str):
             i_σ += 1
 
     # Iterate again to find origin for each additional component

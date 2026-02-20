@@ -95,6 +95,23 @@ def apply_config_defaults(config: dict) -> None:
         module_globals[key] = val
 
 
+def register_linetype(name: str, flux_bounds: tuple, redshift_bounds: tuple, fwhm_bounds: tuple) -> None:
+    """Register a custom line type with given prior bounds.
+
+    Args:
+        name: Line type name (e.g. ``'iron'``).
+        flux_bounds: ``(lo, hi)`` flux prior bounds (scale relative to guess).
+        redshift_bounds: ``(lo, hi)`` redshift prior bounds (dimensionless).
+        fwhm_bounds: ``(lo, hi)`` FWHM prior bounds (km/s).
+    """
+    if name not in LINETYPES:
+        LINETYPES[name] = len(linetypes)
+        linetypes.append(name)
+    flux[name] = flux_bounds
+    redshift[name] = redshift_bounds
+    fwhm[name] = fwhm_bounds
+
+
 def convertToArray(priorDict: dict[str, tuple[float]]) -> jnp.ndarray:
     """
     Convert dictionary of priors to JAX Array
